@@ -7,7 +7,23 @@ import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 
 const __dirname = join(fileURLToPath(import.meta.url), "..");
-const STATIC_DIR = join(__dirname, "..", "..", "static");
+
+// Resolve STATIC_DIR: try multiple paths since Vercel may restructure the layout
+function findStaticDir(): string {
+  const candidates = [
+    join(__dirname, "..", "..", "static"),       // .vercel/output/static (Build Output API v3)
+    join(__dirname, "..", "static"),              // .vercel/output/functions/static
+    join(process.cwd(), "static"),                // cwd/static
+    join(process.cwd(), "..", "static"),          // parent/static
+    join(process.cwd(), "..", "..", "static"),    // grandparent/static
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "index.html"))) return dir;
+  }
+  return candidates[0]; // fallback to first
+}
+
+const STATIC_DIR = findStaticDir();
 
 // In-memory demo venues
 const venues = [
