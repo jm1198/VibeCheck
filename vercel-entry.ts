@@ -165,5 +165,7 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(staticDir, "index.html"));
 });
 
-// Vercel serverless handler
-export default app;
+// Vercel serverless handler — wrap Express app as (req, res) function
+export default function handler(req: any, res: any) {
+  return app(req, res);
+}
