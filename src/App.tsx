@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import VenueGrid from "./pages/VenueGrid";
 import VenueDetail from "./pages/VenueDetail";
 import Login from "./pages/Login";
+import Setup from "./pages/Setup";
 import Dashboard from "./pages/Dashboard";
 
 export default function App() {
@@ -11,6 +12,7 @@ export default function App() {
         <Route path="/" element={<VenueGrid />} />
         <Route path="/venue/:id" element={<VenueDetail />} />
         <Route path="/dashboard" element={<Login />} />
+        <Route path="/setup" element={<Setup />} />
         <Route path="/dashboard/manage" element={<Dashboard />} />
       </Routes>
     </div>

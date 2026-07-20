@@ -72,3 +72,16 @@ export function regenerateStreamKey(venueId: number): Promise<{ stream_key: stri
 export function checkHours(venueId: number): Promise<HoursCheck> {
   return request<HoursCheck>(`/venues/${venueId}/hours-check`);
 }
+
+export function createVenue(data: {
+  name: string;
+  location: string;
+  description: string;
+  category: string;
+  business_hours: string;
+}): Promise<Venue> {
+  return request<Venue>("/venues", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}

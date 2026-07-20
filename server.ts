@@ -125,6 +125,74 @@ app.post("/api/auth/signup", (req, res) => {
   res.json({ success: true });
 });
 
+// Auth: create venue (owner only — must be authenticated and have no venue)
+app.post("/api/venues", async (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const db = getDb();
+  const user = db.prepare("SELECT id, venue_id FROM users WHERE id = ?").get(session.userId) as
+    | { id: number; venue_id: number | null }
+    | undefined;
+  if (!user) {
+    res.status(401).json({ error: "User not found" });
+    return;
+  }
+  if (user.venue_id) {
+    res.status(409).json({ error: "You already have a venue" });
+    return;
+  }
+
+  const { name, location, description, category, business_hours } = req.body;
+  if (!name || !location) {
+    res.status(400).json({ error: "Name and location are required" });
+    return;
+  }
+
+  const defaultHours = JSON.stringify({
+    monday: { open: "17:00", close: "02:00" },
+    tuesday: { open: "17:00", close: "02:00" },
+    wednesday: { open: "17:00", close: "02:00" },
+    thursday: { open: "17:00", close: "02:00" },
+    friday: { open: "16:00", close: "03:00" },
+    saturday: { open: "16:00", close: "03:00" },
+    sunday: { open: "17:00", close: "00:00" },
+  });
+
+  const hours = business_hours || defaultHours;
+  const desc = description || "";
+  const cat = category || "bar";
+  const thumb = `/api/thumbnail/${Date.now()}`;
+
+  const result = db.prepare(
+    "INSERT INTO venues (name, location, description, category, thumbnail_url, business_hours, owner_email) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(name, location, desc, cat, thumb, hours, user.id.toString());
+
+  const venueId = result.lastInsertRowid as number;
+
+  // Link venue to user
+  db.prepare("UPDATE users SET venue_id = ? WHERE id = ?").run(venueId, user.id);
+
+  // Update all user's sessions with venue_id
+  db.prepare("UPDATE sessions SET venue_id = ? WHERE user_id = ?").run(venueId, user.id);
+
+  // Auto-create Mux live stream if configured
+  let streamInfo = null;
+  if (isConfigured()) {
+    try {
+      streamInfo = await createLiveStream(venueId);
+    } catch (err) {
+      console.error("Failed to create Mux stream for new venue:", err);
+      // Non-fatal — venue was created, stream can be set up later
+    }
+  }
+
+  const venue = db.prepare("SELECT * FROM venues WHERE id = ?").get(venueId);
+  res.status(201).json({ ...(venue as object), stream_info: streamInfo });
+});
+
 // Auth: login
 app.post("/api/auth/login", (req, res) => {
   const { email, password } = req.body;

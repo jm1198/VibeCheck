@@ -18,11 +18,17 @@ export default function Login() {
       if (mode === "login") {
         const result = await login(email, password);
         localStorage.setItem("vibecheck_token", result.token);
-        navigate("/dashboard/manage");
+        if (result.venue_id) {
+          navigate("/dashboard/manage");
+        } else {
+          navigate("/setup");
+        }
       } else {
         await signup(email, password);
-        setMode("login");
-        setError("Account created! Please log in.");
+        // Auto-login after signup and redirect to venue setup
+        const loginResult = await login(email, password);
+        localStorage.setItem("vibecheck_token", loginResult.token);
+        navigate("/setup");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
