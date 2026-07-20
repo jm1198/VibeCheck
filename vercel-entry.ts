@@ -1,14 +1,15 @@
-// Vercel serverless entrypoint — serves static files + API routes.
-// Uses in-memory demo data (no SQLite in serverless).
+// Vercel serverless entrypoint — plain Node.js handler (no Express).
+// Serves static files from Vite build and handles API routes.
 
-import express from "express";
-import crypto from "crypto";
-import path from "path";
-import { fileURLToPath } from "url";
+import { readFileSync, existsSync } from "node:fs";
+import { join, extname } from "node:path";
+import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = join(fileURLToPath(import.meta.url), "..");
+const STATIC_DIR = join(__dirname, "..", "..", "static");
 
-// In-memory demo venues (no SQLite in Vercel)
+// In-memory demo venues
 const venues = [
   {
     id: 1,
@@ -119,53 +120,149 @@ function generateThumbnail(id: number): string {
   </svg>`;
 }
 
-const app = express();
-app.use(express.json());
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+};
 
-app.get("/api/thumbnail/:id", (req, res) => {
-  const id = parseInt(req.params.id, 10) || 1;
-  res.setHeader("Content-Type", "image/svg+xml");
-  res.setHeader("Cache-Control", "public, max-age=3600");
-  res.send(generateThumbnail(id));
-});
+function json(res: any, status: number, data: any) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(data));
+}
 
-app.get("/api/venues", (_req, res) => res.json(venues));
-app.get("/api/venues/:id", (req, res) => {
-  const v = venues.find((v) => v.id === parseInt(req.params.id));
-  if (!v) return res.status(404).json({ error: "Venue not found" });
-  res.json(v);
-});
-
-app.post("/api/auth/login", (req, res) => {
-  const { email, password } = req.body;
-  const hash = crypto.createHash("sha256").update(password).digest("hex");
-  if (email !== demoUser.email || hash !== demoUser.password_hash) {
-    return res.status(401).json({ error: "Invalid credentials" });
+function sendFile(res: any, filePath: string) {
+  try {
+    const data = readFileSync(filePath);
+    const ext = extname(filePath).toLowerCase();
+    res.statusCode = 200;
+    res.setHeader("Content-Type", MIME_TYPES[ext] || "application/octet-stream");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.end(data);
+  } catch {
+    res.statusCode = 404;
+    res.end("Not Found");
   }
-  const token = crypto.randomBytes(32).toString("hex");
-  res.json({ token, venue_id: demoUser.venue_id, email: demoUser.email });
-});
+}
 
-app.get("/api/auth/me", (_req, res) => {
-  res.json({ id: demoUser.id, email: demoUser.email, venue_id: demoUser.venue_id });
-});
+function readBody(req: any): Promise<any> {
+  return new Promise((resolve) => {
+    if (req.body) return resolve(req.body);
+    let data = "";
+    req.on("data", (chunk: string) => { data += chunk; });
+    req.on("end", () => {
+      try { resolve(JSON.parse(data)); } catch { resolve({}); }
+    });
+  });
+}
 
-app.patch("/api/venues/:id", (req, res) => {
-  const v = venues.find((v) => v.id === parseInt(req.params.id));
-  if (!v) return res.status(404).json({ error: "Venue not found" });
-  if (req.body.is_live !== undefined) v.is_live = req.body.is_live ? 1 : 0;
-  if (req.body.description) v.description = req.body.description;
-  res.json(v);
-});
+// Main request handler
+export default async function handler(req: any, res: any) {
+  try {
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const pathname = url.pathname;
 
-// Serve static files
-const staticDir = path.join(__dirname, "..", "static");
-app.use(express.static(staticDir));
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(staticDir, "index.html"));
-});
+    // API routes
+    if (pathname.startsWith("/api/")) {
+      // CORS headers
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-// Vercel serverless handler — wrap Express app as (req, res) function
-export default function handler(req: any, res: any) {
-  return app(req, res);
+      if (req.method === "OPTIONS") {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+
+      // GET /api/venues
+      if (pathname === "/api/venues" && req.method === "GET") {
+        return json(res, 200, venues);
+      }
+
+      // GET /api/venues/:id
+      const venueMatch = pathname.match(/^\/api\/venues\/(\d+)$/);
+      if (venueMatch && req.method === "GET") {
+        const v = venues.find((v) => v.id === parseInt(venueMatch[1]));
+        if (!v) return json(res, 404, { error: "Venue not found" });
+        return json(res, 200, v);
+      }
+
+      // PATCH /api/venues/:id
+      if (venueMatch && req.method === "PATCH") {
+        const v = venues.find((v) => v.id === parseInt(venueMatch[1]));
+        if (!v) return json(res, 404, { error: "Venue not found" });
+        const body = await readBody(req);
+        if (body.is_live !== undefined) v.is_live = body.is_live ? 1 : 0;
+        if (body.description) v.description = body.description;
+        return json(res, 200, v);
+      }
+
+      // GET /api/thumbnail/:id
+      const thumbMatch = pathname.match(/^\/api\/thumbnail\/(\d+)$/);
+      if (thumbMatch && req.method === "GET") {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "image/svg+xml");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        res.end(generateThumbnail(parseInt(thumbMatch[1])));
+        return;
+      }
+
+      // POST /api/auth/login
+      if (pathname === "/api/auth/login" && req.method === "POST") {
+        const body = await readBody(req);
+        const hash = crypto.createHash("sha256").update(body.password || "").digest("hex");
+        if (body.email !== demoUser.email || hash !== demoUser.password_hash) {
+          return json(res, 401, { error: "Invalid credentials" });
+        }
+        const token = crypto.randomBytes(32).toString("hex");
+        return json(res, 200, { token, venue_id: demoUser.venue_id, email: demoUser.email });
+      }
+
+      // GET /api/auth/me
+      if (pathname === "/api/auth/me" && req.method === "GET") {
+        return json(res, 200, { id: demoUser.id, email: demoUser.email, venue_id: demoUser.venue_id });
+      }
+
+      // Fallback for unknown API routes
+      return json(res, 404, { error: "Not found" });
+    }
+
+    // Serve static files — try the file directly, then fall back to index.html (SPA)
+    const filePath = pathname === "/" ? "/index.html" : pathname;
+    const fullPath = join(STATIC_DIR, filePath);
+    
+    if (existsSync(fullPath) && !fullPath.startsWith(join(STATIC_DIR, "index.html")) && fullPath.startsWith(STATIC_DIR)) {
+      return sendFile(res, fullPath);
+    }
+
+    // SPA fallback: serve index.html
+    const indexPath = join(STATIC_DIR, "index.html");
+    if (existsSync(indexPath)) {
+      const data = readFileSync(indexPath);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.end(data);
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end("Not Found");
+  } catch (err: any) {
+    console.error("Handler error:", err);
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ error: "Internal Server Error", message: err.message }));
+  }
 }
