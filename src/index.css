@@ -1,0 +1,232 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Background & Surface ── */
+  --color-vibe-bg: #fafafa;
+  --color-vibe-surface: #f0f0f0;
+  --color-vibe-card: #ffffff;
+  --color-vibe-card-hover: #f6f5f5;
+  --color-vibe-card-elevated: #ffffff;
+
+  /* ── Accents ── */
+  --color-vibe-accent: #8b5cf6;
+  --color-vibe-accent-glow: #7c3aed;
+  --color-vibe-accent-subtle: #6d28d9;
+  --color-vibe-cyan: #0891b2;
+  --color-vibe-live: #dc2626;
+
+  /* ── Text ── */
+  --color-vibe-text: #1a1a1a;
+  --color-vibe-text-secondary: #4a4a4a;
+  --color-vibe-muted: #6b6b6b;
+  --color-vibe-muted-dim: #9a9a9a;
+
+  /* ── Borders ── */
+  --color-vibe-border: rgba(0, 0, 0, 0.08);
+  --color-vibe-border-light: rgba(0, 0, 0, 0.05);
+  --color-vibe-border-dark: #1a1a1a;
+
+  /* ── Radius scale ── */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+
+  /* ── Shadows ── */
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-card-hover: 0 8px 24px -4px rgb(0 0 0 / 0.08), 0 4px 8px -2px rgb(0 0 0 / 0.06);
+  --shadow-glow: 0 0 0 1px rgb(139 92 246 / 0.1), 0 4px 16px -4px rgb(139 92 246 / 0.1);
+  --shadow-glow-strong: 0 0 0 1px rgb(139 92 246 / 0.18), 0 8px 32px -4px rgb(139 92 246 / 0.15);
+}
+
+/* ── Base ── */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  background-color: var(--color-vibe-bg);
+  color: var(--color-vibe-text);
+  font-family: 'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Typography Scale ── */
+h1, h2, h3 {
+  font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+h4, h5, h6 {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+p { line-height: 1.65; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-vibe-muted-dim);
+  border-radius: 100px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-vibe-muted);
+}
+
+/* ── Focus ring ── */
+*:focus-visible {
+  outline: 2px solid var(--color-vibe-accent);
+  outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════ */
+
+/* Live pulse */
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.live-pulse {
+  animation: pulse-live 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Shimmer loading */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    110deg,
+    #f0f0f0 8%,
+    #e6e6e6 18%,
+    #f0f0f0 33%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+/* Card entrance (staggered via animation-delay) */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-card-in {
+  animation: card-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Fade up */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.35s ease-out both;
+}
+
+/* Subtle scale on press (for buttons on mobile) */
+@keyframes press-scale {
+  from { transform: scale(1); }
+  to { transform: scale(0.96); }
+}
+
+.press-scale:active {
+  animation: press-scale 0.1s ease-out both;
+}
+
+/* ── Ring glow for live indicator ── */
+@keyframes ring-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(220 38 38 / 0.35); }
+  50% { box-shadow: 0 0 0 6px rgb(220 38 38 / 0); }
+}
+
+.live-ring-glow {
+  animation: ring-glow 2s ease-in-out infinite;
+}
+
+/* ── Gradient text utility ── */
+.gradient-text {
+  background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 45%, #0891b2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ═══════════════════════════════════════════
+   COMPONENT STYLES
+   ═══════════════════════════════════════════ */
+
+/* Toggle switch */
+.toggle-track {
+  width: 44px;
+  height: 24px;
+  border-radius: 100px;
+  background: var(--color-vibe-border-light);
+  position: relative;
+  transition: background 0.25s ease;
+  cursor: pointer;
+}
+
+.toggle-track.active {
+  background: var(--color-vibe-accent);
+}
+
+.toggle-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+}
+
+.toggle-track.active .toggle-thumb {
+  transform: translateX(20px);
+}
+
+/* Elegant hover on cards */
+.glow-on-hover {
+  position: relative;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.glow-on-hover:hover {
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* ── Media: smooth images ── */
+img {
+  display: block;
+  max-width: 100%;
+}
+
+img.thumb-img {
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.group:hover img.thumb-img {
+  transform: scale(1.04);
+}
