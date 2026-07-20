@@ -240,14 +240,15 @@ export default async function handler(req: any, res: any) {
     }
 
     // Serve static files — try the file directly, then fall back to index.html (SPA)
-    const filePath = pathname === "/" ? "/index.html" : pathname;
-    const fullPath = join(STATIC_DIR, filePath);
+    const cleanPath = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
+    const fullPath = join(STATIC_DIR, cleanPath);
     
-    if (existsSync(fullPath) && !fullPath.startsWith(join(STATIC_DIR, "index.html")) && fullPath.startsWith(STATIC_DIR)) {
+    // Only serve if it's a real file under STATIC_DIR (not the SPA fallback yet)
+    if (cleanPath !== "index.html" && existsSync(fullPath)) {
       return sendFile(res, fullPath);
     }
 
-    // SPA fallback: serve index.html
+    // SPA fallback: serve index.html for any unmatched route
     const indexPath = join(STATIC_DIR, "index.html");
     if (existsSync(indexPath)) {
       const data = readFileSync(indexPath);
