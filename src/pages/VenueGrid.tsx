@@ -143,7 +143,7 @@ export default function VenueGrid() {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="shimmer rounded-2xl h-[420px]" />
+              <div key={i} className="shimmer rounded-2xl h-[420px] max-w-[80%] sm:max-w-full mx-auto" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
@@ -160,7 +160,7 @@ export default function VenueGrid() {
               <Link
                 key={venue.id}
                 to={`/venue/${venue.id}`}
-                className="animate-card-in block"
+                className="animate-card-in block max-w-[80%] sm:max-w-full mx-auto"
                 style={{ animationDelay: `${i * 80}ms` }}
               >
                 <VenueCard venue={venue} />

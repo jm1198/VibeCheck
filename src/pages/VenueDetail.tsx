@@ -166,7 +166,7 @@ export default function VenueDetail() {
               <Link
                 key={v.id}
                 to={`/venue/${v.id}`}
-                className="animate-card-in block"
+                className="animate-card-in block max-w-[80%] sm:max-w-full mx-auto"
                 style={{ animationDelay: `${i * 80}ms` }}
               >
                 <VenueCard venue={v} />
