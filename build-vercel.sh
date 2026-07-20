@@ -22,6 +22,9 @@ bun build vercel-entry.ts --target node \
   --outfile .vercel/output/functions/render.func/index.mjs \
   --external:better-sqlite3
 
+# Copy index.html alongside the function so the SPA fallback can serve it
+cp dist/index.html .vercel/output/functions/render.func/index.html
+
 cat > .vercel/output/functions/render.func/.vc-config.json <<'JSON'
 { "runtime": "nodejs22.x", "handler": "index.mjs", "launcherType": "Nodejs", "supportsResponseStreaming": true }
 JSON

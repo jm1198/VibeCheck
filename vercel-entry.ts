@@ -2,28 +2,16 @@
 // Serves static files from Vite build and handles API routes.
 
 import { readFileSync, existsSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 
 const __dirname = join(fileURLToPath(import.meta.url), "..");
 
-// Resolve STATIC_DIR: try multiple paths since Vercel may restructure the layout
-function findStaticDir(): string {
-  const candidates = [
-    join(__dirname, "..", "..", "static"),       // .vercel/output/static (Build Output API v3)
-    join(__dirname, "..", "static"),              // .vercel/output/functions/static
-    join(process.cwd(), "static"),                // cwd/static
-    join(process.cwd(), "..", "static"),          // parent/static
-    join(process.cwd(), "..", "..", "static"),    // grandparent/static
-  ];
-  for (const dir of candidates) {
-    if (existsSync(join(dir, "index.html"))) return dir;
-  }
-  return candidates[0]; // fallback to first
-}
-
-const STATIC_DIR = findStaticDir();
+// index.html is copied alongside this function at build time.
+// The path is relative to the bundled .mjs file in .vercel/output/functions/render.func/
+const INDEX_HTML_PATH = join(__dirname, "index.html");
+const INDEX_HTML = existsSync(INDEX_HTML_PATH) ? readFileSync(INDEX_HTML_PATH, "utf-8") : null;
 
 // In-memory demo venues
 const venues = [
@@ -136,40 +124,10 @@ function generateThumbnail(id: number): string {
   </svg>`;
 }
 
-const MIME_TYPES: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "application/javascript; charset=utf-8",
-  ".mjs": "application/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".webp": "image/webp",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-};
-
 function json(res: any, status: number, data: any) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(data));
-}
-
-function sendFile(res: any, filePath: string) {
-  try {
-    const data = readFileSync(filePath);
-    const ext = extname(filePath).toLowerCase();
-    res.statusCode = 200;
-    res.setHeader("Content-Type", MIME_TYPES[ext] || "application/octet-stream");
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    res.end(data);
-  } catch {
-    res.statusCode = 404;
-    res.end("Not Found");
-  }
 }
 
 function readBody(req: any): Promise<any> {
@@ -255,22 +213,13 @@ export default async function handler(req: any, res: any) {
       return json(res, 404, { error: "Not found" });
     }
 
-    // Serve static files — try the file directly, then fall back to index.html (SPA)
-    const cleanPath = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
-    const fullPath = join(STATIC_DIR, cleanPath);
-    
-    // Only serve if it's a real file under STATIC_DIR (not the SPA fallback yet)
-    if (cleanPath !== "index.html" && existsSync(fullPath)) {
-      return sendFile(res, fullPath);
-    }
-
-    // SPA fallback: serve index.html for any unmatched route
-    const indexPath = join(STATIC_DIR, "index.html");
-    if (existsSync(indexPath)) {
-      const data = readFileSync(indexPath);
+    // SPA fallback: serve index.html for any non-API route.
+    // Static assets (JS, CSS, images) are handled by Vercel's filesystem handler
+    // before reaching this function, so only client-side routes land here.
+    if (INDEX_HTML) {
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.end(data);
+      res.end(INDEX_HTML);
       return;
     }
 
