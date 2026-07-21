@@ -153,6 +153,50 @@ interface DensityRecord {
 }
 const densityRecords: DensityRecord[] = [];
 
+// ── Favorites (in-memory for serverless) ──
+interface FavoriteRecord {
+  user_id: number;
+  venue_id: number;
+  created_at: string;
+}
+const favorites: FavoriteRecord[] = [];
+
+// ── Push subscriptions (in-memory for serverless) ──
+interface PushSub {
+  id?: number;
+  user_id: number;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  created_at: string;
+}
+const pushSubscriptions: PushSub[] = [];
+
+// ── VAPID keys (in-memory, regenerated per cold start) ──
+let vapidKeys: { publicKey: string; privateKey: string } | null = null;
+
+function getVapidKeysForServerless(): { publicKey: string; privateKey: string } {
+  if (vapidKeys) return vapidKeys;
+  try {
+    // Dynamic import — web-push is bundled
+    const webpush = require("web-push");
+    vapidKeys = webpush.generateVAPIDKeys();
+  } catch {
+    // Fallback: generate locally using crypto
+    const { generateKeyPairSync } = require("node:crypto");
+    const { publicKey, privateKey } = generateKeyPairSync("ec", {
+      namedCurve: "prime256v1",
+      publicKeyEncoding: { type: "spki", format: "der" },
+      privateKeyEncoding: { type: "pkcs8", format: "der" },
+    });
+    vapidKeys = {
+      publicKey: Buffer.from(publicKey).toString("base64url"),
+      privateKey: Buffer.from(privateKey).toString("base64url"),
+    };
+  }
+  return vapidKeys;
+}
+
 function getDensityLabel(score: number): string {
   if (score <= 2) return "Empty";
   if (score <= 4) return "Quiet";
@@ -252,8 +296,14 @@ export default async function handler(req: any, res: any) {
         const v = venues.find((v) => v.id === parseInt(venueMatch[1]));
         if (!v) return json(res, 404, { error: "Venue not found" });
         const body = await readBody(req);
+        const wasLive = v.is_live === 1;
         if (body.is_live !== undefined) v.is_live = body.is_live ? 1 : 0;
         if (body.description) v.description = body.description;
+        // Note: push notifications for go-live are handled in server.ts (Express)
+        // Vercel serverless doesn't persist subscriptions between cold starts
+        if (!wasLive && v.is_live === 1) {
+          console.log(`Venue "${v.name}" went live — push notifications would fire in dev mode`);
+        }
         return json(res, 200, v);
       }
 
@@ -508,6 +558,93 @@ export default async function handler(req: any, res: any) {
           analyzed_at: analyzedAt,
           label: getDensityLabel(densityScore),
         });
+      }
+
+      // ── Favorites ──
+
+      // POST /api/venues/:id/favorite — toggle favorite
+      const favoriteMatch = pathname.match(/^\/api\/venues\/(\d+)\/favorite$/);
+      if (favoriteMatch && req.method === "POST") {
+        const session = getSessionUser(req);
+        if (!session) return json(res, 401, { error: "Unauthorized" });
+        const venueId = parseInt(favoriteMatch[1]);
+        const v = venues.find((v) => v.id === venueId);
+        if (!v) return json(res, 404, { error: "Venue not found" });
+
+        const idx = favorites.findIndex((f) => f.user_id === session.userId && f.venue_id === venueId);
+        if (idx >= 0) {
+          favorites.splice(idx, 1);
+          return json(res, 200, { favorited: false });
+        } else {
+          favorites.push({ user_id: session.userId, venue_id: venueId, created_at: new Date().toISOString() });
+          return json(res, 200, { favorited: true });
+        }
+      }
+
+      // GET /api/venues/favorites
+      if (pathname === "/api/venues/favorites" && req.method === "GET") {
+        const session = getSessionUser(req);
+        if (!session) return json(res, 401, { error: "Unauthorized" });
+        const userFavs = favorites
+          .filter((f) => f.user_id === session.userId)
+          .sort((a, b) => b.created_at.localeCompare(a.created_at));
+        const favVenues = userFavs
+          .map((f) => {
+            const v = venues.find((v) => v.id === f.venue_id);
+            return v ? { ...v, favorited_at: f.created_at } : null;
+          })
+          .filter(Boolean);
+        return json(res, 200, favVenues);
+      }
+
+      // ── Push Notifications ──
+
+      // GET /api/push/vapid-public-key
+      if (pathname === "/api/push/vapid-public-key" && req.method === "GET") {
+        const keys = getVapidKeysForServerless();
+        return json(res, 200, { publicKey: keys.publicKey });
+      }
+
+      // POST /api/push/subscribe
+      if (pathname === "/api/push/subscribe" && req.method === "POST") {
+        const session = getSessionUser(req);
+        if (!session) return json(res, 401, { error: "Unauthorized" });
+        const body = await readBody(req);
+        if (!body.endpoint || !body.keys?.p256dh || !body.keys?.auth) {
+          return json(res, 400, { error: "endpoint, keys.p256dh, and keys.auth are required" });
+        }
+        const idx = pushSubscriptions.findIndex((s) => s.endpoint === body.endpoint);
+        if (idx >= 0) {
+          pushSubscriptions[idx] = {
+            user_id: session.userId,
+            endpoint: body.endpoint,
+            p256dh: body.keys.p256dh,
+            auth: body.keys.auth,
+            created_at: new Date().toISOString(),
+          };
+        } else {
+          pushSubscriptions.push({
+            user_id: session.userId,
+            endpoint: body.endpoint,
+            p256dh: body.keys.p256dh,
+            auth: body.keys.auth,
+            created_at: new Date().toISOString(),
+          });
+        }
+        return json(res, 200, { success: true });
+      }
+
+      // POST /api/push/unsubscribe
+      if (pathname === "/api/push/unsubscribe" && req.method === "POST") {
+        const session = getSessionUser(req);
+        if (!session) return json(res, 401, { error: "Unauthorized" });
+        const body = await readBody(req);
+        if (!body.endpoint) return json(res, 400, { error: "endpoint is required" });
+        const idx = pushSubscriptions.findIndex(
+          (s) => s.endpoint === body.endpoint && s.user_id === session.userId
+        );
+        if (idx >= 0) pushSubscriptions.splice(idx, 1);
+        return json(res, 200, { success: true });
       }
 
       // Fallback for unknown API routes

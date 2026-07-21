@@ -1,5 +1,5 @@
-// VibeCheck Service Worker — Cache-first strategy
-const CACHE_VERSION = "vibecheck-v2";
+// VibeCheck Service Worker — Cache-first strategy + Push notifications
+const CACHE_VERSION = "vibecheck-v3";
 const CACHE_NAME = `vibecheck-cache-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -74,6 +74,66 @@ self.addEventListener("fetch", (event) => {
         }
         return new Response("Offline", { status: 503 });
       });
+    })
+  );
+});
+
+// ─── Push Notifications ────────────────────────────────────────
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    // Non-JSON payload — ignore
+    return;
+  }
+
+  const { title, body, icon, badge, data } = payload;
+
+  const options = {
+    body: body || "",
+    icon: icon || "/icon-192.png",
+    badge: badge || "/icon-192.png",
+    data: data || {},
+    vibrate: [200, 100, 200],
+    tag: `venue-go-live-${data?.venueId || "unknown"}`,
+    requireInteraction: false,
+    actions: [
+      {
+        action: "view",
+        title: "Check the vibe",
+      },
+    ],
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(title || "VibeCheck", options)
+  );
+});
+
+// Handle notification click
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const urlToOpen = event.notification.data?.url || "/";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      // If there's already an open window, navigate it
+      for (const client of clients) {
+        if (client.url.includes(self.location.origin) && "focus" in client) {
+          client.focus();
+          client.postMessage({ type: "navigate", url: urlToOpen });
+          return;
+        }
+      }
+      // Otherwise, open a new window
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(urlToOpen);
+      }
     })
   );
 });

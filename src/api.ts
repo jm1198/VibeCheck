@@ -133,3 +133,35 @@ export function refreshDensity(venueId: number): Promise<CrowdDensity> {
     method: "POST",
   });
 }
+
+// ── Favorites ────────────────────────────────────────────────
+
+export function toggleFavorite(venueId: number): Promise<{ favorited: boolean }> {
+  return request<{ favorited: boolean }>(`/venues/${venueId}/favorite`, {
+    method: "POST",
+  });
+}
+
+export function getFavorites(): Promise<(Venue & { favorited_at: string })[]> {
+  return request<(Venue & { favorited_at: string })[]>("/venues/favorites");
+}
+
+// ── Push Notifications ───────────────────────────────────────
+
+export function subscribePush(subscription: PushSubscriptionJSON): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>("/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(subscription),
+  });
+}
+
+export function unsubscribePush(endpoint: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>("/push/unsubscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export function getVapidPublicKey(): Promise<{ publicKey: string }> {
+  return request<{ publicKey: string }>("/push/vapid-public-key");
+}

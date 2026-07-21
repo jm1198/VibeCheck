@@ -5,8 +5,10 @@ import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocketServer, WebSocket } from "ws";
+import webpush from "web-push";
 import { getDb, generateStreamKey } from "./db.ts";
 import type { VenueRow } from "./db.ts";
+import { getVapidKeys } from "./src/vapid.ts";
 import {
   isConfigured,
   getPlaybackUrl,
@@ -101,7 +103,25 @@ app.get("/api/venues", (_req, res) => {
   res.json(venues);
 });
 
-// Public: single venue
+// Get user's favorited venues (auth required) — must be before :id
+app.get("/api/venues/favorites", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const db = getDb();
+  const favorites = db.prepare(`
+    SELECT v.*, f.created_at as favorited_at
+    FROM favorites f
+    JOIN venues v ON v.id = f.venue_id
+    WHERE f.user_id = ?
+    ORDER BY f.created_at DESC
+  `).all(session.userId) as (VenueRow & { favorited_at: string })[];
+  res.json(favorites);
+});
+
+// Public: single venue — NOTE: must come after /api/venues/favorites
 app.get("/api/venues/:id", (req, res) => {
   const db = getDb();
   const venue = db.prepare("SELECT * FROM venues WHERE id = ?").get(parseInt(req.params.id)) as VenueRow | undefined;
@@ -381,6 +401,9 @@ app.patch("/api/venues/:id", (req, res) => {
   const updates: string[] = [];
   const values: unknown[] = [];
 
+  const wasLive = venue.is_live === 1;
+  const goingLive = is_live === true || is_live === 1;
+
   if (is_live !== undefined) {
     updates.push("is_live = ?");
     values.push(is_live ? 1 : 0);
@@ -416,8 +439,15 @@ app.patch("/api/venues/:id", (req, res) => {
     db.prepare(`UPDATE venues SET ${updates.join(", ")} WHERE id = ?`).run(...values);
   }
 
-  const updated = db.prepare("SELECT * FROM venues WHERE id = ?").get(venueId);
+  const updated = db.prepare("SELECT * FROM venues WHERE id = ?").get(venueId) as VenueRow;
   res.json(updated);
+
+  // ── Push notifications: venue just went live ──
+  if (!wasLive && goingLive) {
+    sendLiveNotifications(venueId, updated.name).catch((err) =>
+      console.error("Failed to send live push notifications:", err)
+    );
+  }
 });
 
 // ─── Stream Key Management ─────────────────────────────────────
@@ -863,6 +893,167 @@ app.post("/api/venues/:id/density/refresh", async (req, res) => {
     res.status(500).json({ error: "Density analysis failed", detail: err instanceof Error ? err.message : "Unknown error" });
   }
 });
+
+// ─── Favorites ─────────────────────────────────────────────────
+
+// Toggle favorite for a venue (auth required)
+app.post("/api/venues/:id/favorite", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const venueId = parseInt(req.params.id);
+  const db = getDb();
+
+  // Check venue exists
+  const venue = db.prepare("SELECT id FROM venues WHERE id = ?").get(venueId);
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+
+  const existing = db.prepare(
+    "SELECT id FROM favorites WHERE user_id = ? AND venue_id = ?"
+  ).get(session.userId, venueId);
+
+  if (existing) {
+    // Unfavorite
+    db.prepare("DELETE FROM favorites WHERE user_id = ? AND venue_id = ?").run(session.userId, venueId);
+    res.json({ favorited: false });
+  } else {
+    // Favorite
+    db.prepare("INSERT INTO favorites (user_id, venue_id) VALUES (?, ?)").run(session.userId, venueId);
+    res.json({ favorited: true });
+  }
+});
+
+// ─── Push Notifications ────────────────────────────────────────
+
+// Get VAPID public key (public, needed by service worker registration)
+app.get("/api/push/vapid-public-key", (_req, res) => {
+  const keys = getVapidKeys();
+  res.json({ publicKey: keys.publicKey });
+});
+
+// Subscribe to push notifications (auth required)
+app.post("/api/push/subscribe", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const { endpoint, keys } = req.body;
+  if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    res.status(400).json({ error: "endpoint, keys.p256dh, and keys.auth are required" });
+    return;
+  }
+
+  const db = getDb();
+
+  // Upsert: avoid duplicate subscriptions for the same endpoint
+  const existing = db.prepare(
+    "SELECT id FROM push_subscriptions WHERE endpoint = ?"
+  ).get(endpoint);
+
+  if (existing) {
+    db.prepare(
+      "UPDATE push_subscriptions SET user_id = ?, p256dh = ?, auth = ? WHERE endpoint = ?"
+    ).run(session.userId, keys.p256dh, keys.auth, endpoint);
+  } else {
+    db.prepare(
+      "INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)"
+    ).run(session.userId, endpoint, keys.p256dh, keys.auth);
+  }
+
+  res.json({ success: true });
+});
+
+// Unsubscribe from push notifications (auth required)
+app.post("/api/push/unsubscribe", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const { endpoint } = req.body;
+  if (!endpoint) {
+    res.status(400).json({ error: "endpoint is required" });
+    return;
+  }
+
+  const db = getDb();
+  db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?").run(endpoint, session.userId);
+  res.json({ success: true });
+});
+
+// Helper: send push notifications to all users who favorited a venue
+async function sendLiveNotifications(venueId: number, venueName: string) {
+  const db = getDb();
+  const keys = getVapidKeys();
+
+  webpush.setVapidDetails(
+    "mailto:notifications@vibecheck.app",
+    keys.publicKey,
+    keys.privateKey
+  );
+
+  // Find all push subscriptions for users who favorited this venue
+  const subs = db.prepare(`
+    SELECT ps.endpoint, ps.p256dh, ps.auth
+    FROM push_subscriptions ps
+    JOIN favorites f ON f.user_id = ps.user_id
+    WHERE f.venue_id = ?
+  `).all(venueId) as { endpoint: string; p256dh: string; auth: string }[];
+
+  if (subs.length === 0) {
+    console.log(`No push subscribers for venue ${venueId}`);
+    return;
+  }
+
+  const payload = JSON.stringify({
+    title: `🔴 ${venueName} is now live`,
+    body: "Tap to check the vibe",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    data: {
+      url: `/venue/${venueId}`,
+      venueId,
+    },
+  });
+
+  const results = await Promise.allSettled(
+    subs.map((sub) =>
+      webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
+        },
+        payload
+      )
+    )
+  );
+
+  let sent = 0;
+  let failed = 0;
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      sent++;
+    } else {
+      failed++;
+      // If subscription is gone (410) or invalid, remove it
+      const err = result.reason;
+      if (err?.statusCode === 410 || err?.statusCode === 404) {
+        const sub = subs[results.indexOf(result as any)];
+        if (sub) {
+          db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(sub.endpoint);
+        }
+      }
+    }
+  }
+
+  console.log(`Push notifications for venue "${venueName}": ${sent} sent, ${failed} failed`);
+}
 
 // ─── Static files & SPA fallback ───────────────────────────────
 

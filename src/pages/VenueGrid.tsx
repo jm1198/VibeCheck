@@ -3,9 +3,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { getVenues } from "../api";
+import { getVenues, getFavorites, toggleFavorite as toggleFavoriteApi } from "../api";
 import type { Venue } from "../types";
 import VenueCard from "../components/VenueCard";
+import { useAuth } from "../AuthContext";
 
 // Fix Leaflet default marker icon paths
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -57,11 +58,14 @@ function getDensityColor(score: number | null | undefined): string {
 
 export default function VenueGrid() {
   const [venues, setVenues] = useState<Venue[]>([]);
+  const [favorites, setFavorites] = useState<Venue[]>([]);
+  const [favIds, setFavIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"grid" | "map">("grid");
   const navigate = useNavigate();
+  const { isLoggedIn } = useAuth();
 
   useEffect(() => {
     getVenues()
@@ -69,6 +73,44 @@ export default function VenueGrid() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  // Load favorites when logged in
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setFavorites([]);
+      setFavIds(new Set());
+      return;
+    }
+    getFavorites()
+      .then((favs) => {
+        setFavorites(favs);
+        setFavIds(new Set(favs.map((f) => f.id)));
+      })
+      .catch(() => {});
+  }, [isLoggedIn]);
+
+  const handleToggleFavorite = async (venueId: number) => {
+    try {
+      const result = await toggleFavoriteApi(venueId);
+      if (result.favorited) {
+        // Find venue and add to favorites
+        const venue = venues.find((v) => v.id === venueId);
+        if (venue) {
+          setFavorites((prev) => [venue, ...prev.filter((f) => f.id !== venueId)]);
+          setFavIds((prev) => new Set(prev).add(venueId));
+        }
+      } else {
+        setFavorites((prev) => prev.filter((f) => f.id !== venueId));
+        setFavIds((prev) => {
+          const next = new Set(prev);
+          next.delete(venueId);
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error("Failed to toggle favorite:", err);
+    }
+  };
 
   const filtered = venues.filter((v) => {
     const matchesSearch =
@@ -184,6 +226,47 @@ export default function VenueGrid() {
 
       {/* ═══ VENUE GRID ═══ */}
       <section className="max-w-5xl mx-auto px-4 sm:px-6 pb-12 sm:pb-16">
+        {/* ═══ YOUR FAVORITES (auth-gated) ═══ */}
+        {isLoggedIn && favorites.length > 0 && (
+          <div className="mb-12">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                <svg className="w-4.5 h-4.5 text-red-500" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-bold text-vibe-text">Your Favorites</h2>
+                <p className="text-vibe-muted text-sm">
+                  {favorites.length} venue{favorites.length !== 1 ? "s" : ""} saved
+                </p>
+              </div>
+            </div>
+            {/* Horizontal scrollable row */}
+            <div className="flex gap-5 overflow-x-auto pb-4 -mx-1 px-1 no-scrollbar snap-x">
+              {favorites.map((venue, i) => (
+                <Link
+                  key={venue.id}
+                  to={`/venue/${venue.id}`}
+                  className="animate-card-in shrink-0 w-[280px] snap-start"
+                  style={{ animationDelay: `${i * 60}ms` }}
+                >
+                  <VenueCard
+                    venue={venue}
+                    isFavorited={true}
+                    showFavorite={true}
+                    onToggleFavorite={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleToggleFavorite(venue.id);
+                    }}
+                  />
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Section heading */}
         <div className="flex items-center gap-3 mb-8">
           <div className="w-9 h-9 rounded-xl bg-vibe-accent/10 flex items-center justify-center shrink-0">
@@ -329,7 +412,16 @@ export default function VenueGrid() {
                 className="animate-card-in block max-w-[80%] sm:max-w-full mx-auto"
                 style={{ animationDelay: `${i * 80}ms` }}
               >
-                <VenueCard venue={venue} />
+                <VenueCard
+                  venue={venue}
+                  isFavorited={favIds.has(venue.id)}
+                  showFavorite={isLoggedIn}
+                  onToggleFavorite={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleToggleFavorite(venue.id);
+                  }}
+                />
               </Link>
             ))}
           </div>

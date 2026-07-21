@@ -257,3 +257,12 @@ img.thumb-img {
   background: transparent !important;
   border: none !important;
 }
+
+/* Hide scrollbar for horizontal scrolling sections */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
