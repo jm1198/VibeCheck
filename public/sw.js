@@ -1,5 +1,5 @@
 // VibeCheck Service Worker — Cache-first strategy
-const CACHE_VERSION = "vibecheck-v1";
+const CACHE_VERSION = "vibecheck-v2";
 const CACHE_NAME = `vibecheck-cache-${CACHE_VERSION}`;
 
 const APP_SHELL = [
