@@ -150,7 +150,7 @@ app.post("/api/venues", async (req, res) => {
     return;
   }
 
-  const { name, location, description, category, business_hours } = req.body;
+  const { name, location, description, category, business_hours, latitude, longitude } = req.body;
   if (!name || !location) {
     res.status(400).json({ error: "Name and location are required" });
     return;
@@ -172,8 +172,8 @@ app.post("/api/venues", async (req, res) => {
   const thumb = `/api/thumbnail/${Date.now()}`;
 
   const result = db.prepare(
-    "INSERT INTO venues (name, location, description, category, thumbnail_url, business_hours, owner_email) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run(name, location, desc, cat, thumb, hours, user.id.toString());
+    "INSERT INTO venues (name, location, description, category, thumbnail_url, business_hours, owner_email, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(name, location, desc, cat, thumb, hours, user.id.toString(), latitude ?? null, longitude ?? null);
 
   const venueId = result.lastInsertRowid as number;
 
@@ -256,7 +256,7 @@ app.patch("/api/venues/:id", (req, res) => {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-  const { is_live, business_hours, description, name, location } = req.body;
+  const { is_live, business_hours, description, name, location, latitude, longitude } = req.body;
   const updates: string[] = [];
   const values: unknown[] = [];
 
@@ -279,6 +279,14 @@ app.patch("/api/venues/:id", (req, res) => {
   if (location !== undefined) {
     updates.push("location = ?");
     values.push(location);
+  }
+  if (latitude !== undefined) {
+    updates.push("latitude = ?");
+    values.push(latitude);
+  }
+  if (longitude !== undefined) {
+    updates.push("longitude = ?");
+    values.push(longitude);
   }
 
   if (updates.length > 0) {

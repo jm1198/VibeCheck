@@ -1,14 +1,67 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { getVenues } from "../api";
 import type { Venue } from "../types";
 import VenueCard from "../components/VenueCard";
+
+// Fix Leaflet default marker icon paths
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
+
+function createCircleMarker(color: string, isLive: boolean) {
+  const size = isLive ? 16 : 12;
+  return L.divIcon({
+    className: "custom-marker",
+    html: `<div style="
+      width: ${size}px;
+      height: ${size}px;
+      background: ${color};
+      border: 3px solid white;
+      border-radius: 50%;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    "></div>`,
+    iconSize: [size + 6, size + 6],
+    iconAnchor: [(size + 6) / 2, (size + 6) / 2],
+    popupAnchor: [0, -((size + 6) / 2)],
+  });
+}
+
+function getDensityLabel(score: number | null | undefined): string {
+  if (score == null) return "Unknown";
+  if (score <= 2) return "Empty";
+  if (score <= 4) return "Quiet";
+  if (score <= 6) return "Moderate";
+  if (score <= 8) return "Busy";
+  return "Packed";
+}
+
+function getDensityColor(score: number | null | undefined): string {
+  if (score == null) return "text-vibe-muted";
+  if (score <= 2) return "text-blue-600";
+  if (score <= 4) return "text-green-600";
+  if (score <= 6) return "text-yellow-600";
+  if (score <= 8) return "text-orange-600";
+  return "text-red-600";
+}
 
 export default function VenueGrid() {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"grid" | "map">("grid");
+  const navigate = useNavigate();
 
   useEffect(() => {
     getVenues()
@@ -55,6 +108,12 @@ export default function VenueGrid() {
               className="px-4 py-2 rounded-xl text-sm font-semibold bg-vibe-accent text-white shadow-md transition-all"
             >
               Browse
+            </Link>
+            <Link
+              to="/map"
+              className="px-4 py-2 rounded-xl text-sm font-medium text-vibe-muted hover:text-vibe-text transition-all"
+            >
+              Map
             </Link>
             <Link
               to="/dashboard"
@@ -132,11 +191,40 @@ export default function VenueGrid() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
           </div>
-          <div>
+          <div className="flex-1">
             <h2 className="text-xl font-bold text-vibe-text">Venues</h2>
             <p className="text-vibe-muted text-sm">
               {filter === "all" ? "Browse all locations" : `Showing ${filter} venues`}
             </p>
+          </div>
+          {/* Grid/Map toggle */}
+          <div className="flex items-center bg-vibe-surface rounded-xl p-1 border border-vibe-border">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                viewMode === "grid"
+                  ? "bg-white text-vibe-text shadow-sm"
+                  : "text-vibe-muted hover:text-vibe-text"
+              }`}
+            >
+              <svg className="w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+              </svg>
+              Grid
+            </button>
+            <button
+              onClick={() => setViewMode("map")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                viewMode === "map"
+                  ? "bg-white text-vibe-text shadow-sm"
+                  : "text-vibe-muted hover:text-vibe-text"
+              }`}
+            >
+              <svg className="w-4 h-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+              </svg>
+              Map
+            </button>
           </div>
         </div>
 
@@ -154,7 +242,85 @@ export default function VenueGrid() {
               Try a different search or filter
             </p>
           </div>
+        ) : viewMode === "map" ? (
+          /* ── Inline Map View ── */
+          <div className="rounded-2xl overflow-hidden border-2 border-vibe-border-dark shadow-card" style={{ height: "500px" }}>
+            <MapContainer
+              center={[32.7157, -117.1611]}
+              zoom={13}
+              className="h-full w-full"
+              zoomControl={true}
+              attributionControl={true}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              {filtered
+                .filter((v) => v.latitude != null && v.longitude != null)
+                .map((venue) => {
+                  const isLive = venue.is_live === 1;
+                  const color = isLive ? "#22c55e" : "#9ca3af";
+                  const icon = createCircleMarker(color, isLive);
+                  return (
+                    <Marker
+                      key={venue.id}
+                      position={[venue.latitude!, venue.longitude!]}
+                      icon={icon}
+                    >
+                      <Popup>
+                        <div className="min-w-[180px]">
+                          <h3
+                            className="font-bold text-base text-vibe-text mb-1"
+                            style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+                          >
+                            {venue.name}
+                          </h3>
+                          <span
+                            className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border mb-2 uppercase tracking-wide ${
+                              venue.category === "club"
+                                ? "border-fuchsia-600 text-fuchsia-700"
+                                : venue.category === "lounge"
+                                ? "border-emerald-600 text-emerald-700"
+                                : "border-amber-600 text-amber-700"
+                            }`}
+                          >
+                            {venue.category}
+                          </span>
+                          {isLive && venue.crowd_density != null && (
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <span className={`text-xs font-bold ${getDensityColor(venue.crowd_density)}`}>
+                                {getDensityLabel(venue.crowd_density)} ({venue.crowd_density}/10)
+                              </span>
+                            </div>
+                          )}
+                          {isLive && (
+                            <div className="flex items-center gap-1.5 text-vibe-live text-xs font-semibold mb-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-vibe-live live-pulse" />
+                              Live · {venue.viewer_count} watching
+                            </div>
+                          )}
+                          {!isLive && (
+                            <div className="flex items-center gap-1.5 text-vibe-muted-dim text-xs font-semibold mb-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-vibe-muted-dim" />
+                              Offline
+                            </div>
+                          )}
+                          <button
+                            onClick={() => navigate(`/venue/${venue.id}`)}
+                            className="w-full mt-1 px-3 py-1.5 bg-vibe-accent text-white text-sm font-semibold rounded-xl hover:bg-vibe-accent-glow transition-colors"
+                          >
+                            View venue →
+                          </button>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  );
+                })}
+            </MapContainer>
+          </div>
         ) : (
+          /* ── Grid View ── */
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-8">
             {filtered.map((venue, i) => (
               <Link

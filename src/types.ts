@@ -10,6 +10,8 @@ export interface Venue {
   owner_email: string;
   business_hours: string;
   stream_key?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   crowd_density?: number | null;
   density_updated_at?: string | null;
   created_at: string;

@@ -33,15 +33,23 @@ function initSchema() {
       owner_email TEXT,
       business_hours TEXT NOT NULL DEFAULT '{"monday":{"open":"17:00","close":"02:00"},"tuesday":{"open":"17:00","close":"02:00"},"wednesday":{"open":"17:00","close":"02:00"},"thursday":{"open":"17:00","close":"02:00"},"friday":{"open":"16:00","close":"03:00"},"saturday":{"open":"16:00","close":"03:00"},"sunday":{"open":"17:00","close":"00:00"}}',
       stream_key TEXT,
+      latitude REAL,
+      longitude REAL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
 
-  // Migration: add stream_key column if missing (for existing DBs)
+  // Migration: add missing columns for existing DBs
   const cols = d.prepare("PRAGMA table_info(venues)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "stream_key")) {
     d.run("ALTER TABLE venues ADD COLUMN stream_key TEXT");
+  }
+  if (!cols.some((c) => c.name === "latitude")) {
+    d.run("ALTER TABLE venues ADD COLUMN latitude REAL");
+  }
+  if (!cols.some((c) => c.name === "longitude")) {
+    d.run("ALTER TABLE venues ADD COLUMN longitude REAL");
   }
 
   d.run(`
@@ -113,47 +121,53 @@ function seedIfEmpty() {
   if (row.c > 0) return;
 
   const insert = db.prepare(`
-    INSERT INTO venues (name, location, description, category, thumbnail_url, is_live, viewer_count, owner_email)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO venues (name, location, description, category, thumbnail_url, is_live, viewer_count, owner_email, latitude, longitude)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const venues = [
     {
-      name: "Neon Dragon",
-      location: "242 E 14th St, New York, NY",
-      description:
-        "Underground cocktail bar with live DJs and dragon-themed neon decor. Known for craft cocktails and an electric Friday night crowd.",
-      category: "bar",
-      thumbnail: "/api/thumbnail/1",
-      is_live: 1,
-      viewers: 42,
-      email: "owner@neondragon.com",
-    },
-    {
-      name: "The Velvet Room",
-      location: "88 King St, San Francisco, CA",
-      description:
-        "Upscale lounge with velvet interiors, jazz nights, and a curated wine list. Perfect for a sophisticated night out.",
-      category: "lounge",
-      thumbnail: "/api/thumbnail/2",
-      is_live: 1,
-      viewers: 18,
-      email: "owner@velvetroom.com",
-    },
-    {
       name: "Bassline Club",
-      location: "15 Rave Ave, Miami, FL",
+      location: "Gaslamp Quarter, San Diego, CA",
       description:
         "High-energy nightclub with world-class sound system, EDM nights, and a packed dance floor every weekend.",
       category: "club",
-      thumbnail: "/api/thumbnail/3",
+      thumbnail: "/api/thumbnail/1",
       is_live: 1,
       viewers: 87,
       email: "owner@bassline.com",
+      lat: 32.7115,
+      lng: -117.1587,
+    },
+    {
+      name: "Neon Dragon",
+      location: "Gaslamp Quarter, San Diego, CA",
+      description:
+        "Underground cocktail bar with live DJs and dragon-themed neon decor. Known for craft cocktails and an electric Friday night crowd.",
+      category: "bar",
+      thumbnail: "/api/thumbnail/2",
+      is_live: 1,
+      viewers: 42,
+      email: "owner@neondragon.com",
+      lat: 32.7120,
+      lng: -117.1595,
+    },
+    {
+      name: "The Velvet Room",
+      location: "North Park, San Diego, CA",
+      description:
+        "Upscale lounge with velvet interiors, jazz nights, and a curated wine list. Perfect for a sophisticated night out.",
+      category: "lounge",
+      thumbnail: "/api/thumbnail/3",
+      is_live: 1,
+      viewers: 18,
+      email: "owner@velvetroom.com",
+      lat: 32.7457,
+      lng: -117.1295,
     },
     {
       name: "The Hideaway",
-      location: "420 Bryant St, Austin, TX",
+      location: "Pacific Beach, San Diego, CA",
       description:
         "Cozy speakeasy hidden behind a bookshelf. Live acoustic sets, craft beers, and the best quiet vibe in town.",
       category: "bar",
@@ -161,17 +175,21 @@ function seedIfEmpty() {
       is_live: 0,
       viewers: 0,
       email: "owner@hideaway.com",
+      lat: 32.7952,
+      lng: -117.2547,
     },
     {
       name: "Skybar Rooftop",
-      location: "1200 Sunset Blvd, Los Angeles, CA",
+      location: "Gaslamp Quarter, San Diego, CA",
       description:
-        "Rooftop bar with panoramic city views, poolside cabanas, and sunset happy hours. LA's hottest open-air venue.",
+        "Rooftop bar with panoramic city views, poolside cabanas, and sunset happy hours. San Diego's hottest open-air venue.",
       category: "bar",
       thumbnail: "/api/thumbnail/5",
       is_live: 0,
       viewers: 0,
       email: "owner@skybar.com",
+      lat: 32.7110,
+      lng: -117.1575,
     },
   ];
 
@@ -185,7 +203,9 @@ function seedIfEmpty() {
         v.thumbnail,
         v.is_live,
         v.viewers,
-        v.email
+        v.email,
+        v.lat,
+        v.lng
       );
     }
   });
@@ -219,6 +239,8 @@ export interface VenueRow {
   owner_email: string;
   business_hours: string;
   stream_key: string | null;
+  latitude: number | null;
+  longitude: number | null;
   crowd_density: number | null;
   density_updated_at: string | null;
   created_at: string;
