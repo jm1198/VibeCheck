@@ -56,8 +56,10 @@ export default function Login() {
     }
   }, [isDashboardPath]);
 
-  // Load Google Identity Services
+  // Load Google Identity Services (only if a real client ID is configured)
   useEffect(() => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    if (!clientId || clientId.startsWith("YOUR_")) return;
     if (accountType !== "consumer" || mode !== "login") return;
 
     // Load the GIS script
@@ -82,11 +84,15 @@ export default function Login() {
   const initGoogleButton = useCallback(() => {
     if (!window.google?.accounts) return;
 
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    // Only initialize if a real Google Client ID is configured
+    if (!clientId || clientId.startsWith("YOUR_")) return;
+
     const btnContainer = document.getElementById("google-signin-btn");
     if (!btnContainer) return;
 
     window.google.accounts.id.initialize({
-      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+      client_id: clientId,
       callback: handleGoogleCredential,
       auto_select: false,
       context: "signin",
@@ -232,8 +238,8 @@ export default function Login() {
             </div>
           )}
 
-          {/* Google Sign In (consumer login only) */}
-          {accountType === "consumer" && mode === "login" && (
+          {/* Google Sign In (consumer login only, when configured) */}
+          {accountType === "consumer" && mode === "login" && import.meta.env.VITE_GOOGLE_CLIENT_ID && !(import.meta.env.VITE_GOOGLE_CLIENT_ID as string).startsWith("YOUR_") && (
             <>
               <div id="google-signin-btn" className="flex justify-center min-h-[40px]" />
               <div className="flex items-center gap-3">
