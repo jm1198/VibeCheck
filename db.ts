@@ -50,8 +50,34 @@ function initSchema() {
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       venue_id INTEGER,
+      role TEXT NOT NULL DEFAULT 'consumer',
+      google_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (venue_id) REFERENCES venues(id)
+    )
+  `);
+
+  // Migration: add role column if missing
+  const userCols = d.prepare("PRAGMA table_info(users)").all() as { name: string }[];
+  if (!userCols.some((c) => c.name === "role")) {
+    d.run("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'consumer'");
+  }
+  if (!userCols.some((c) => c.name === "google_id")) {
+    d.run("ALTER TABLE users ADD COLUMN google_id TEXT");
+  }
+
+  // Migration: set role='venue_owner' for existing users who have a venue
+  d.run("UPDATE users SET role = 'venue_owner' WHERE venue_id IS NOT NULL AND role = 'consumer'");
+
+  d.run(`
+    CREATE TABLE IF NOT EXISTS view_cooldowns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      venue_id INTEGER NOT NULL,
+      last_viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (venue_id) REFERENCES venues(id),
+      UNIQUE(user_id, venue_id)
     )
   `);
 
@@ -158,8 +184,8 @@ function seedIfEmpty() {
     .update("demo123")
     .digest("hex");
   db.prepare(
-    "INSERT OR IGNORE INTO users (email, password_hash, venue_id) VALUES (?, ?, ?)"
-  ).run("demo@vibecheck.app", hash, 1);
+    "INSERT OR IGNORE INTO users (email, password_hash, venue_id, role) VALUES (?, ?, ?, ?)"
+  ).run("demo@vibecheck.app", hash, 1, "venue_owner");
 
   console.log("Seeded 5 demo venues + 1 demo user (demo@vibecheck.app / demo123)");
 }
@@ -189,5 +215,7 @@ export interface UserRow {
   email: string;
   password_hash: string;
   venue_id: number | null;
+  role: string;
+  google_id: string | null;
   created_at: string;
 }

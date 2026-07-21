@@ -92,6 +92,7 @@ const demoUser = {
   email: "demo@vibecheck.app",
   password_hash: crypto.createHash("sha256").update("demo123").digest("hex"),
   venue_id: 1,
+  role: "venue_owner",
 };
 
 function generateThumbnail(id: number): string {
@@ -141,6 +142,29 @@ function readBody(req: any): Promise<any> {
   });
 }
 
+// In-memory session store for demo (Vercel serverless)
+const sessions = new Map<string, { userId: number; venueId: number | null; role: string; expiresAt: number }>();
+
+function getSessionUser(req: any): { userId: number; venueId: number | null; role: string } | null {
+  const token = (req.headers.authorization || "").replace("Bearer ", "");
+  if (!token) return null;
+  const session = sessions.get(token);
+  if (!session || session.expiresAt < Date.now()) {
+    if (session) sessions.delete(token);
+    return null;
+  }
+  return { userId: session.userId, venueId: session.venueId, role: session.role };
+}
+
+function createSession(userId: number, venueId: number | null, role: string): string {
+  const token = crypto.randomBytes(32).toString("hex");
+  sessions.set(token, { userId, venueId, role, expiresAt: Date.now() + 24 * 60 * 60 * 1000 });
+  return token;
+}
+
+// In-memory cooldown store for demo
+const cooldowns = new Map<string, number>(); // key: "userId:venueId", value: timestamp
+
 // Main request handler
 export default async function handler(req: any, res: any) {
   try {
@@ -167,20 +191,54 @@ export default async function handler(req: any, res: any) {
 
       // GET /api/venues/:id
       const venueMatch = pathname.match(/^\/api\/venues\/(\d+)$/);
-      if (venueMatch && req.method === "GET") {
+      const viewMatch = venueMatch && pathname.endsWith("/view");
+      if (venueMatch && !viewMatch && req.method === "GET") {
         const v = venues.find((v) => v.id === parseInt(venueMatch[1]));
         if (!v) return json(res, 404, { error: "Venue not found" });
         return json(res, 200, v);
       }
 
       // PATCH /api/venues/:id
-      if (venueMatch && req.method === "PATCH") {
+      if (venueMatch && !viewMatch && req.method === "PATCH") {
         const v = venues.find((v) => v.id === parseInt(venueMatch[1]));
         if (!v) return json(res, 404, { error: "Venue not found" });
         const body = await readBody(req);
         if (body.is_live !== undefined) v.is_live = body.is_live ? 1 : 0;
         if (body.description) v.description = body.description;
         return json(res, 200, v);
+      }
+
+      // POST /api/venues/:id/view — auth-required view with cooldown
+      if (venueMatch && pathname.endsWith("/view") && req.method === "POST") {
+        const session = getSessionUser(req);
+        if (!session) {
+          return json(res, 401, { error: "Sign in required to watch live feeds" });
+        }
+        const vId = parseInt(venueMatch[1]);
+        const v = venues.find((v) => v.id === vId);
+        if (!v) return json(res, 404, { error: "Venue not found" });
+
+        const cooldownKey = `${session.userId}:${vId}`;
+        const lastViewed = cooldowns.get(cooldownKey);
+        const now = Date.now();
+        if (lastViewed) {
+          const elapsed = (now - lastViewed) / 1000;
+          if (elapsed < 30 * 60) {
+            const remaining = Math.ceil(30 * 60 - elapsed);
+            return json(res, 429, {
+              error: "Cooldown active",
+              remaining_seconds: remaining,
+              message: `You can watch again in ${Math.ceil(remaining / 60)} minutes`,
+            });
+          }
+        }
+        cooldowns.set(cooldownKey, now);
+        return json(res, 200, {
+          view_token: crypto.randomBytes(16).toString("hex"),
+          view_window_seconds: 15,
+          cooldown_minutes: 30,
+          message: "Stream access granted for 15 seconds",
+        });
       }
 
       // GET /api/thumbnail/:id
@@ -200,13 +258,66 @@ export default async function handler(req: any, res: any) {
         if (body.email !== demoUser.email || hash !== demoUser.password_hash) {
           return json(res, 401, { error: "Invalid credentials" });
         }
-        const token = crypto.randomBytes(32).toString("hex");
-        return json(res, 200, { token, venue_id: demoUser.venue_id, email: demoUser.email });
+        const token = createSession(demoUser.id, demoUser.venue_id, demoUser.role);
+        return json(res, 200, { token, venue_id: demoUser.venue_id, email: demoUser.email, role: demoUser.role });
+      }
+
+      // POST /api/auth/signup
+      if (pathname === "/api/auth/signup" && req.method === "POST") {
+        const body = await readBody(req);
+        if (!body.email || !body.password) {
+          return json(res, 400, { error: "Email and password required" });
+        }
+        if (body.email === demoUser.email) {
+          return json(res, 409, { error: "Email already registered" });
+        }
+        const userRole = body.role === "venue_owner" ? "venue_owner" : "consumer";
+        return json(res, 200, { success: true, role: userRole });
+      }
+
+      // POST /api/auth/google
+      if (pathname === "/api/auth/google" && req.method === "POST") {
+        const body = await readBody(req);
+        if (!body.credential) {
+          return json(res, 400, { error: "Google credential required" });
+        }
+
+        // Verify token with Google
+        let googleUser: { sub: string; email: string; name: string };
+        try {
+          const verifyRes = await fetch(
+            `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(body.credential)}`
+          );
+          if (!verifyRes.ok) {
+            return json(res, 401, { error: "Invalid Google credential" });
+          }
+          googleUser = await verifyRes.json() as { sub: string; email: string; name: string };
+        } catch {
+          return json(res, 401, { error: "Failed to verify Google credential" });
+        }
+
+        // For the demo, create a simple session (in production, this would use the DB)
+        // Use a deterministic fake ID based on the Google sub
+        const fakeId = Math.abs(hashCode(googleUser.sub)) % 10000 + 100;
+        const token = createSession(fakeId, null, "consumer");
+        return json(res, 200, {
+          token,
+          venue_id: null,
+          email: googleUser.email,
+          role: "consumer",
+        });
       }
 
       // GET /api/auth/me
       if (pathname === "/api/auth/me" && req.method === "GET") {
-        return json(res, 200, { id: demoUser.id, email: demoUser.email, venue_id: demoUser.venue_id });
+        const session = getSessionUser(req);
+        if (!session) {
+          return json(res, 401, { error: "Unauthorized" });
+        }
+        if (session.userId === demoUser.id) {
+          return json(res, 200, { id: demoUser.id, email: demoUser.email, venue_id: demoUser.venue_id, role: demoUser.role });
+        }
+        return json(res, 200, { id: session.userId, email: "", venue_id: session.venueId, role: session.role });
       }
 
       // Fallback for unknown API routes
@@ -214,8 +325,6 @@ export default async function handler(req: any, res: any) {
     }
 
     // SPA fallback: serve index.html for any non-API route.
-    // Static assets (JS, CSS, images) are handled by Vercel's filesystem handler
-    // before reaching this function, so only client-side routes land here.
     if (INDEX_HTML) {
       res.statusCode = 200;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -231,4 +340,14 @@ export default async function handler(req: any, res: any) {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify({ error: "Internal Server Error", message: err.message }));
   }
+}
+
+function hashCode(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return hash;
 }

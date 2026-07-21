@@ -76,15 +76,15 @@ function generateSessionToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
-function getSessionUser(req: express.Request): { userId: number; venueId: number | null } | null {
+function getSessionUser(req: express.Request): { userId: number; venueId: number | null; role: string } | null {
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!token) return null;
   const db = getDb();
   const session = db
-    .prepare("SELECT user_id, venue_id FROM sessions WHERE id = ? AND expires_at > datetime('now')")
-    .get(token) as { user_id: number; venue_id: number | null } | undefined;
+    .prepare("SELECT s.user_id, s.venue_id, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > datetime('now')")
+    .get(token) as { user_id: number; venue_id: number | null; role: string } | undefined;
   if (!session) return null;
-  return { userId: session.user_id, venueId: session.venue_id };
+  return { userId: session.user_id, venueId: session.venue_id, role: session.role };
 }
 
 // ─── API Routes ────────────────────────────────────────────────
@@ -109,7 +109,7 @@ app.get("/api/venues/:id", (req, res) => {
 
 // Auth: signup
 app.post("/api/auth/signup", (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, role } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Email and password required" });
     return;
@@ -121,8 +121,9 @@ app.post("/api/auth/signup", (req, res) => {
     return;
   }
   const hash = hashPassword(password);
-  db.prepare("INSERT INTO users (email, password_hash) VALUES (?, ?)").run(email, hash);
-  res.json({ success: true });
+  const userRole = role === "venue_owner" ? "venue_owner" : "consumer";
+  db.prepare("INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)").run(email, hash, userRole);
+  res.json({ success: true, role: userRole });
 });
 
 // Auth: create venue (owner only — must be authenticated and have no venue)
@@ -202,7 +203,7 @@ app.post("/api/auth/login", (req, res) => {
   }
   const db = getDb();
   const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as
-    | { id: number; email: string; password_hash: string; venue_id: number | null }
+    | { id: number; email: string; password_hash: string; venue_id: number | null; role: string }
     | undefined;
   if (!user || user.password_hash !== hashPassword(password)) {
     res.status(401).json({ error: "Invalid credentials" });
@@ -216,7 +217,127 @@ app.post("/api/auth/login", (req, res) => {
     user.venue_id,
     expiresAt
   );
-  res.json({ token, venue_id: user.venue_id, email: user.email });
+  res.json({ token, venue_id: user.venue_id, email: user.email, role: user.role });
+});
+
+// Auth: Google OAuth login/signup
+app.post("/api/auth/google", async (req, res) => {
+  const { credential } = req.body;
+  if (!credential) {
+    res.status(400).json({ error: "Google credential required" });
+    return;
+  }
+
+  // Verify the Google ID token
+  let googleUser: { sub: string; email: string; name: string; picture?: string };
+  try {
+    const verifyRes = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+    );
+    if (!verifyRes.ok) {
+      res.status(401).json({ error: "Invalid Google credential" });
+      return;
+    }
+    googleUser = await verifyRes.json() as { sub: string; email: string; name: string; picture?: string };
+  } catch {
+    res.status(401).json({ error: "Failed to verify Google credential" });
+    return;
+  }
+
+  const db = getDb();
+
+  // Find existing user by google_id or email
+  let user = db.prepare("SELECT * FROM users WHERE google_id = ?").get(googleUser.sub) as
+    | { id: number; email: string; venue_id: number | null; role: string }
+    | undefined;
+
+  if (!user) {
+    user = db.prepare("SELECT * FROM users WHERE email = ?").get(googleUser.email) as
+      | { id: number; email: string; venue_id: number | null; role: string }
+      | undefined;
+    if (user) {
+      // Link Google ID to existing account
+      db.prepare("UPDATE users SET google_id = ? WHERE id = ?").run(googleUser.sub, user.id);
+    }
+  }
+
+  if (!user) {
+    // Create new consumer account
+    db.prepare(
+      "INSERT INTO users (email, password_hash, role, google_id) VALUES (?, ?, ?, ?)"
+    ).run(googleUser.email, "", "consumer", googleUser.sub);
+    user = db.prepare("SELECT * FROM users WHERE google_id = ?").get(googleUser.sub) as
+      | { id: number; email: string; venue_id: number | null; role: string }
+      | undefined;
+  }
+
+  if (!user) {
+    res.status(500).json({ error: "Failed to create user" });
+    return;
+  }
+
+  const token = generateSessionToken();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  db.prepare("INSERT INTO sessions (id, user_id, venue_id, expires_at) VALUES (?, ?, ?, ?)").run(
+    token,
+    user.id,
+    user.venue_id,
+    expiresAt
+  );
+  res.json({ token, venue_id: user.venue_id, email: user.email, role: user.role });
+});
+
+// View cooldown: record a view and enforce 30min cooldown (auth required)
+app.post("/api/venues/:id/view", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Sign in required to watch live feeds" });
+    return;
+  }
+
+  const venueId = parseInt(req.params.id);
+  const db = getDb();
+
+  // Check if venue exists
+  const venue = db.prepare("SELECT id FROM venues WHERE id = ?").get(venueId);
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+
+  // Check cooldown: 30 minutes between view starts
+  const cooldown = db.prepare(
+    "SELECT last_viewed_at FROM view_cooldowns WHERE user_id = ? AND venue_id = ?"
+  ).get(session.userId, venueId) as { last_viewed_at: string } | undefined;
+
+  const now = new Date();
+  if (cooldown) {
+    const lastViewed = new Date(cooldown.last_viewed_at + "Z");
+    const elapsed = (now.getTime() - lastViewed.getTime()) / 1000; // seconds
+    if (elapsed < 30 * 60) {
+      const remaining = Math.ceil(30 * 60 - elapsed);
+      res.status(429).json({
+        error: "Cooldown active",
+        remaining_seconds: remaining,
+        message: `You can watch again in ${Math.ceil(remaining / 60)} minutes`,
+      });
+      return;
+    }
+  }
+
+  // Record/update the view
+  db.prepare(
+    "INSERT INTO view_cooldowns (user_id, venue_id, last_viewed_at) VALUES (?, ?, datetime('now')) ON CONFLICT(user_id, venue_id) DO UPDATE SET last_viewed_at = datetime('now')"
+  ).run(session.userId, venueId);
+
+  // Return the stream access with a 15-second view window
+  const viewToken = crypto.randomBytes(16).toString("hex");
+  res.json({
+    view_token: viewToken,
+    view_window_seconds: 15,
+    cooldown_minutes: 30,
+    message: "Stream access granted for 15 seconds",
+  });
 });
 
 // Auth: me
@@ -227,8 +348,8 @@ app.get("/api/auth/me", (req, res) => {
     return;
   }
   const db = getDb();
-  const user = db.prepare("SELECT id, email, venue_id FROM users WHERE id = ?").get(session.userId) as
-    | { id: number; email: string; venue_id: number | null }
+  const user = db.prepare("SELECT id, email, venue_id, role FROM users WHERE id = ?").get(session.userId) as
+    | { id: number; email: string; venue_id: number | null; role: string }
     | undefined;
   res.json(user);
 });

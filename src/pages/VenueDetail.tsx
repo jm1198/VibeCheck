@@ -4,12 +4,14 @@ import { getVenue, getVenues } from "../api";
 import type { Venue } from "../types";
 import LiveFeed from "../components/LiveFeed";
 import VenueCard from "../components/VenueCard";
+import { useAuth } from "../AuthContext";
 
 export default function VenueDetail() {
   const { id } = useParams<{ id: string }>();
   const [venue, setVenue] = useState<Venue | null>(null);
   const [others, setOthers] = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
+  const { isLoggedIn, loading: authLoading } = useAuth();
 
   useEffect(() => {
     if (!id) return;
@@ -68,9 +70,17 @@ export default function VenueDetail() {
         Back to venues
       </Link>
 
-      {/* Live Feed — dark border frame */}
+      {/* Live Feed — gated behind auth */}
       <div className="rounded-2xl overflow-hidden border-2 border-vibe-border-dark shadow-card">
-        <LiveFeed venue={venue} />
+        {!authLoading && isLoggedIn ? (
+          <LiveFeed venue={venue} />
+        ) : !authLoading ? (
+          <SignInPrompt venueName={venue.name} />
+        ) : (
+          <div className="relative aspect-video bg-vibe-surface border border-vibe-border flex items-center justify-center overflow-hidden">
+            <div className="shimmer rounded-full w-14 h-14" />
+          </div>
+        )}
       </div>
 
       {/* Venue Info */}
@@ -175,6 +185,29 @@ export default function VenueDetail() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SignInPrompt({ venueName }: { venueName: string }) {
+  return (
+    <div className="relative aspect-video bg-vibe-surface border border-vibe-border flex items-center justify-center overflow-hidden">
+      <div className="text-center px-6 max-w-sm">
+        <div className="text-5xl mb-4">🔐</div>
+        <p className="text-vibe-text text-base font-semibold">Sign in to watch</p>
+        <p className="text-vibe-muted text-sm mt-2">
+          Create a free account to watch the live feed from {venueName} and check the vibe before you go.
+        </p>
+        <Link
+          to="/login"
+          className="mt-5 inline-flex items-center gap-2 bg-vibe-accent hover:bg-vibe-accent-glow text-white font-semibold rounded-full px-6 py-2.5 transition-all shadow-md press-scale text-sm"
+        >
+          Sign in to watch
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+          </svg>
+        </Link>
+      </div>
     </div>
   );
 }

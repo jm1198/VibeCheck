@@ -43,22 +43,43 @@ export function updateVenue(
 export function login(
   email: string,
   password: string
-): Promise<{ token: string; venue_id: number | null; email: string }> {
+): Promise<{ token: string; venue_id: number | null; email: string; role: string }> {
   return request("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
 }
 
-export function signup(email: string, password: string): Promise<{ success: boolean }> {
+export function signup(
+  email: string,
+  password: string,
+  role: "consumer" | "venue_owner" = "consumer"
+): Promise<{ success: boolean; role: string }> {
   return request("/auth/signup", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, role }),
+  });
+}
+
+export function googleLogin(
+  credential: string
+): Promise<{ token: string; venue_id: number | null; email: string; role: string }> {
+  return request("/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ credential }),
   });
 }
 
 export function getMe(): Promise<User> {
   return request<User>("/auth/me");
+}
+
+export function recordView(
+  venueId: number
+): Promise<{ view_token: string; view_window_seconds: number; cooldown_minutes: number; message: string }> {
+  return request(`/venues/${venueId}/view`, {
+    method: "POST",
+  });
 }
 
 export function getStreamKey(venueId: number): Promise<StreamKeyInfo> {
