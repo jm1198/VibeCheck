@@ -481,6 +481,132 @@ app.get("/api/venues/:id/stream-url", (req, res) => {
   }
 });
 
+// ─── Viewer Session / Viewing Limit ─────────────────────────
+
+const VIEW_DURATION_SEC = 15;
+const COOLDOWN_SEC = 30 * 60; // 30 minutes
+
+function getClientId(req: express.Request): string {
+  // Prefer the client-provided anonymous_id from the request body
+  const bodyId = (req.body as any)?.anonymous_id;
+  if (bodyId && typeof bodyId === "string" && bodyId.length > 0) return bodyId;
+  // Query param fallback (for GET requests)
+  const queryId = (req.query as any)?.anonymous_id;
+  if (queryId && typeof queryId === "string" && queryId.length > 0) return queryId;
+  // IP fallback
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  return `ip:${ip}`;
+}
+
+// POST /api/venues/:id/view — check permission + record view start
+app.post("/api/venues/:id/view", (req, res) => {
+  const venueId = parseInt(req.params.id);
+  if (!venueId || isNaN(venueId)) {
+    res.status(400).json({ error: "Invalid venue ID" });
+    return;
+  }
+
+  const db = getDb();
+  const venue = db.prepare("SELECT id FROM venues WHERE id = ?").get(venueId);
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+
+  const clientId = getClientId(req);
+  const now = new Date();
+
+  // Find the most recent session for this client + venue
+  const session = db
+    .prepare(
+      `SELECT * FROM viewer_sessions
+       WHERE anonymous_id = ? AND venue_id = ?
+       ORDER BY view_started_at DESC LIMIT 1`
+    )
+    .get(clientId, venueId) as
+    | { anonymous_id: string; venue_id: number; view_started_at: string; view_expires_at: string }
+    | undefined;
+
+  if (session) {
+    const expiresAt = new Date(session.view_expires_at + "Z");
+    const startedAt = new Date(session.view_started_at + "Z");
+    const cooldownUntil = new Date(startedAt.getTime() + COOLDOWN_SEC * 1000);
+
+    // Mid-session: still within the 15s viewing window
+    if (now < expiresAt) {
+      const remaining = Math.ceil((expiresAt.getTime() - now.getTime()) / 1000);
+      res.json({ allowed: true, time_remaining: Math.max(0, remaining) });
+      return;
+    }
+
+    // View expired but still within cooldown period
+    if (now < cooldownUntil) {
+      const cooldownRemaining = Math.ceil((cooldownUntil.getTime() - now.getTime()) / 1000);
+      res.json({ allowed: false, cooldown_remaining: Math.max(1, cooldownRemaining) });
+      return;
+    }
+
+    // Cooldown expired — fall through to create a new session
+  }
+
+  // Create new viewing session
+  const startedAt = now.toISOString();
+  const expiresAt = new Date(now.getTime() + VIEW_DURATION_SEC * 1000).toISOString();
+  db.prepare(
+    "INSERT INTO viewer_sessions (anonymous_id, venue_id, view_started_at, view_expires_at) VALUES (?, ?, ?, ?)"
+  ).run(clientId, venueId, startedAt, expiresAt);
+
+  res.json({ allowed: true, time_remaining: VIEW_DURATION_SEC });
+});
+
+// GET /api/venues/:id/view-status — get current status without recording a view
+app.get("/api/venues/:id/view-status", (req, res) => {
+  const venueId = parseInt(req.params.id);
+  if (!venueId || isNaN(venueId)) {
+    res.status(400).json({ error: "Invalid venue ID" });
+    return;
+  }
+
+  const db = getDb();
+  const clientId = getClientId(req);
+  const now = new Date();
+
+  const session = db
+    .prepare(
+      `SELECT * FROM viewer_sessions
+       WHERE anonymous_id = ? AND venue_id = ?
+       ORDER BY view_started_at DESC LIMIT 1`
+    )
+    .get(clientId, venueId) as
+    | { anonymous_id: string; venue_id: number; view_started_at: string; view_expires_at: string }
+    | undefined;
+
+  if (!session) {
+    // No session exists — viewer is free to start
+    res.json({ allowed: true, time_remaining: VIEW_DURATION_SEC });
+    return;
+  }
+
+  const expiresAt = new Date(session.view_expires_at + "Z");
+  const startedAt = new Date(session.view_started_at + "Z");
+  const cooldownUntil = new Date(startedAt.getTime() + COOLDOWN_SEC * 1000);
+
+  if (now < expiresAt) {
+    const remaining = Math.ceil((expiresAt.getTime() - now.getTime()) / 1000);
+    res.json({ allowed: true, time_remaining: Math.max(0, remaining) });
+    return;
+  }
+
+  if (now < cooldownUntil) {
+    const cooldownRemaining = Math.ceil((cooldownUntil.getTime() - now.getTime()) / 1000);
+    res.json({ allowed: false, cooldown_remaining: Math.max(1, cooldownRemaining) });
+    return;
+  }
+
+  // Cooldown expired
+  res.json({ allowed: true, time_remaining: VIEW_DURATION_SEC });
+});
+
 // ─── Static files & SPA fallback ───────────────────────────────
 
 async function startServer() {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Hls from "hls.js";
 import type { Venue, HoursCheck } from "../types";
-import { checkHours } from "../api";
+import { checkHours, requestView, getViewerId } from "../api";
 
 interface LiveFeedProps {
   venue: Venue;
@@ -14,6 +14,16 @@ interface StreamUrlInfo {
 }
 
 type FeedState = "loading" | "live" | "offline" | "closed" | "error";
+type ViewLimitState = "checking" | "authorized" | "cooldown" | "ready";
+
+const VIEW_DURATION = 15;
+const COOLDOWN_DURATION = 30 * 60; // 1800 seconds
+
+function formatTime(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 export default function LiveFeed({ venue }: LiveFeedProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -28,6 +38,44 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
   const [viewerCount, setViewerCount] = useState(venue.viewer_count);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Viewing limit state
+  const [viewLimit, setViewLimit] = useState<ViewLimitState>("checking");
+  const [timeRemaining, setTimeRemaining] = useState(VIEW_DURATION);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
+  const viewerIdRef = useRef<string>("");
+
+  // Stop all streaming — called when view timer expires
+  const stopStreaming = useCallback(() => {
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (mediaSourceRef.current && mediaSourceRef.current.readyState === "open") {
+      try {
+        const sb = sourceBufferRef.current;
+        if (sb && mediaSourceRef.current.activeSourceBuffers.length > 0) {
+          mediaSourceRef.current.removeSourceBuffer(sb);
+        }
+      } catch { /* ignore */ }
+    }
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.src = "";
+      videoRef.current.load();
+    }
+  }, []);
+
+  // ─── Cleanup on unmount ──────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      stopStreaming();
+    };
+  }, [stopStreaming]);
+
   // Check business hours
   useEffect(() => {
     let cancelled = false;
@@ -40,49 +88,134 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
   }, [venue.id]);
 
   // Determine effective liveness: venue.is_live AND within business hours
-  const isEffectivelyLive = venue.is_live === 1 && (!hoursInfo || hoursInfo.is_open || hoursInfo.reason === "no_hours_set");
+  const isEffectivelyLive =
+    venue.is_live === 1 &&
+    (!hoursInfo || hoursInfo.is_open || hoursInfo.reason === "no_hours_set");
+
+  // ─── View permission gate ────────────────────────────────────
+
+  useEffect(() => {
+    if (!isEffectivelyLive) {
+      setViewLimit("checking");
+      return;
+    }
+
+    // Get or create anonymous viewer ID
+    const vid = getViewerId();
+    viewerIdRef.current = vid;
+
+    let cancelled = false;
+    setViewLimit("checking");
+    setState("loading");
+
+    requestView(venue.id, vid)
+      .then((status) => {
+        if (cancelled) return;
+        if (status.allowed) {
+          setTimeRemaining(status.time_remaining ?? VIEW_DURATION);
+          setViewLimit("authorized");
+        } else {
+          setCooldownRemaining(status.cooldown_remaining ?? COOLDOWN_DURATION);
+          setViewLimit("cooldown");
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error("View permission check failed:", err);
+          // Fail open — let the user see the stream
+          setTimeRemaining(VIEW_DURATION);
+          setViewLimit("authorized");
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [venue.id, isEffectivelyLive]);
+
+  // ─── Countdown timer ─────────────────────────────────────────
+
+  useEffect(() => {
+    if (viewLimit !== "authorized" || timeRemaining <= 0) return;
+
+    const interval = setInterval(() => {
+      setTimeRemaining((prev) => {
+        if (prev <= 1) {
+          // Time's up — stop stream, begin cooldown
+          stopStreaming();
+          setState("offline");
+          setViewLimit("cooldown");
+          setCooldownRemaining(COOLDOWN_DURATION);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [viewLimit, timeRemaining, stopStreaming]);
+
+  // ─── Cooldown countdown ──────────────────────────────────────
+
+  useEffect(() => {
+    if (viewLimit !== "cooldown" || cooldownRemaining <= 0) return;
+
+    const interval = setInterval(() => {
+      setCooldownRemaining((prev) => {
+        const next = prev - 1;
+        if (next <= 0) {
+          setViewLimit("ready");
+          return 0;
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [viewLimit, cooldownRemaining]);
 
   // ─── HLS stream starter (Mux or other HLS URL) ──────────
 
-  const startHlsStream = useCallback((hlsUrl: string) => {
-    if (!videoRef.current) return;
+  const startHlsStream = useCallback(
+    (hlsUrl: string) => {
+      if (!videoRef.current) return;
 
-    // Clean up any existing WebSocket
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+      // Clean up any existing WebSocket
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
 
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: false,
-        lowLatencyMode: true,
-        backBufferLength: 90,
-      });
-      hlsRef.current = hls;
-      hls.loadSource(hlsUrl);
-      hls.attachMedia(videoRef.current!);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: false,
+          lowLatencyMode: true,
+          backBufferLength: 90,
+        });
+        hlsRef.current = hls;
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(videoRef.current!);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setState("live");
+          videoRef.current?.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            setState("error");
+            setErrorMsg("Stream unavailable. The venue may not have started their camera yet.");
+            hls.destroy();
+          }
+        });
+      } else if (videoRef.current!.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari native HLS
+        videoRef.current!.src = hlsUrl;
+        videoRef.current!.play().catch(() => {});
         setState("live");
-        videoRef.current?.play().catch(() => {});
-      });
-      hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          setState("error");
-          setErrorMsg("Stream unavailable. The venue may not have started their camera yet.");
-          hls.destroy();
-        }
-      });
-    } else if (videoRef.current!.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari native HLS
-      videoRef.current!.src = hlsUrl;
-      videoRef.current!.play().catch(() => {});
-      setState("live");
-    } else {
-      setState("error");
-      setErrorMsg("Your browser does not support live streaming.");
-    }
-  }, []);
+      } else {
+        setState("error");
+        setErrorMsg("Your browser does not support live streaming.");
+      }
+    },
+    []
+  );
 
   // ─── WebSocket streaming with MediaSource (demo/fallback) ─────
 
@@ -102,16 +235,13 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
 
     mediaSource.addEventListener("sourceopen", () => {
       try {
-        // Try common WebM codec; the broadcaster sends WebM via MediaRecorder
         const codec = 'video/webm; codecs="vp8,opus"';
         if (!MediaSource.isTypeSupported(codec)) {
-          // Fallback: try vp9
           const codec2 = 'video/webm; codecs="vp9,opus"';
           if (MediaSource.isTypeSupported(codec2)) {
             const sb = mediaSource.addSourceBuffer(codec2);
             sourceBufferRef.current = sb;
             sb.addEventListener("updateend", () => {
-              // Flush pending chunks
               while (pendingChunksRef.current.length > 0 && !sb.updating) {
                 const chunk = pendingChunksRef.current.shift();
                 if (chunk) {
@@ -155,12 +285,10 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
         return;
       }
 
-      // Binary video data
       if (sourceBufferRef.current && !sourceBufferRef.current.updating) {
         try {
           sourceBufferRef.current.appendBuffer(new Uint8Array(event.data as ArrayBuffer));
         } catch {
-          // Buffer full or invalid — queue it
           pendingChunksRef.current.push(new Uint8Array(event.data as ArrayBuffer));
         }
       } else {
@@ -176,11 +304,13 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
     ws.onclose = () => {
       if (state === "live") setState("offline");
     };
-  }, [venue.id]);
+  }, [venue.id, state]);
 
-  // ─── Main stream orchestration ────────────────────────────────
+  // ─── Main stream orchestration (gated behind view permission) ─
 
   useEffect(() => {
+    // Only load the stream once view is authorized
+    if (viewLimit !== "authorized") return;
     if (!isEffectivelyLive) {
       setState("closed");
       return;
@@ -188,20 +318,16 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
 
     setState("loading");
 
-    // First, check if Mux stream URL is available
     fetch(`/api/venues/${venue.id}/stream-url`)
       .then((res) => res.json())
       .then((data: StreamUrlInfo) => {
         if (data.url) {
-          // Use Mux HLS stream
           startHlsStream(data.url);
         } else {
-          // Fall back to WebSocket demo behavior
           setupWebSocketStream();
         }
       })
       .catch(() => {
-        // If stream-url endpoint fails, fall back to WebSocket
         setupWebSocketStream();
       });
 
@@ -223,30 +349,54 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
         } catch { /* ignore */ }
       }
     };
-  }, [venue.id, isEffectivelyLive, startHlsStream, setupWebSocketStream]);
+  }, [venue.id, isEffectivelyLive, viewLimit, startHlsStream, setupWebSocketStream]);
 
-  // ─── Render states ───────────────────────────────────────────
+  // ─── "Watch again" handler ───────────────────────────────────
 
-  // Loading
-  if (state === "loading") {
+  const handleWatchAgain = useCallback(() => {
+    const vid = viewerIdRef.current;
+    requestView(venue.id, vid)
+      .then((status) => {
+        if (status.allowed) {
+          setTimeRemaining(status.time_remaining ?? VIEW_DURATION);
+          setViewLimit("authorized");
+        } else {
+          setCooldownRemaining(status.cooldown_remaining ?? COOLDOWN_DURATION);
+          setViewLimit("cooldown");
+        }
+      })
+      .catch(() => {
+        setTimeRemaining(VIEW_DURATION);
+        setViewLimit("authorized");
+      });
+  }, [venue.id]);
+
+  // ════════════════════════════════════════════════════════════════
+  // RENDER
+  // ════════════════════════════════════════════════════════════════
+
+  // ── View-permission checking ────────────────────────────────
+
+  if (viewLimit === "checking") {
     return (
       <div className="relative aspect-video bg-vibe-surface border border-vibe-border flex items-center justify-center overflow-hidden">
         <div className="text-center">
           <div className="shimmer rounded-full w-14 h-14 mx-auto mb-4" />
-          <p className="text-vibe-muted text-base font-medium">Connecting to stream...</p>
-          <p className="text-vibe-muted-dim text-xs mt-2">Establishing live feed from {venue.name}</p>
+          <p className="text-vibe-muted text-base font-medium">Checking preview...</p>
+          <p className="text-vibe-muted-dim text-xs mt-2">Verifying access to {venue.name}</p>
         </div>
       </div>
     );
   }
 
-  // Closed (outside business hours or feed offline)
-  if (state === "closed") {
-    const reason = hoursInfo?.reason === "feed_offline"
-      ? `${venue.name} has paused their feed.`
-      : hoursInfo?.reason === "outside_hours"
-        ? `${venue.name} is currently closed.`
-        : `${venue.name} is not streaming right now.`;
+  // ── Closed (outside business hours or feed offline) ─────────
+  if (!isEffectivelyLive) {
+    const reason =
+      hoursInfo?.reason === "feed_offline"
+        ? `${venue.name} has paused their feed.`
+        : hoursInfo?.reason === "outside_hours"
+          ? `${venue.name} is currently closed.`
+          : `${venue.name} is not streaming right now.`;
 
     return (
       <div className="relative aspect-video bg-vibe-surface border border-vibe-border flex items-center justify-center overflow-hidden">
@@ -268,7 +418,55 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
     );
   }
 
-  // Error
+  // ── Cooldown / Ready overlay ────────────────────────────────
+
+  if (viewLimit === "cooldown" || viewLimit === "ready") {
+    return (
+      <div className="relative aspect-video bg-black overflow-hidden">
+        {/* Dim background with venue name */}
+        <div className="absolute inset-0 bg-gradient-to-br from-vibe-accent/20 via-black/90 to-black flex items-center justify-center">
+          <div className="text-center px-6">
+            {viewLimit === "cooldown" ? (
+              <>
+                <div className="text-6xl mb-5">⏳</div>
+                <h3 className="text-white text-xl font-bold mb-2">Preview ended</h3>
+                <p className="text-gray-400 text-sm mb-4">
+                  Next view available in
+                </p>
+                <p className="text-white text-4xl font-bold tabular-nums tracking-wider mb-6">
+                  {formatTime(cooldownRemaining)}
+                </p>
+                <p className="text-gray-500 text-xs">
+                  Free previews are limited to {VIEW_DURATION} seconds per venue every 30 minutes
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="text-6xl mb-5">🎬</div>
+                <h3 className="text-white text-xl font-bold mb-2">Ready for another look</h3>
+                <p className="text-gray-400 text-sm mb-6">
+                  Your preview has reset — you can watch {venue.name} again
+                </p>
+                <button
+                  onClick={handleWatchAgain}
+                  className="press-scale inline-flex items-center gap-2 px-6 py-3 bg-vibe-accent hover:bg-vibe-accent-glow text-white font-semibold rounded-xl transition-all shadow-glow hover:shadow-glow-strong"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Watch again
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Error ───────────────────────────────────────────────────
+
   if (state === "error") {
     return (
       <div className="relative aspect-video bg-red-50 border border-red-200 flex items-center justify-center overflow-hidden">
@@ -281,7 +479,22 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
     );
   }
 
-  // Offline (was live but stream ended)
+  // ── Loading ─────────────────────────────────────────────────
+
+  if (state === "loading") {
+    return (
+      <div className="relative aspect-video bg-vibe-surface border border-vibe-border flex items-center justify-center overflow-hidden">
+        <div className="text-center">
+          <div className="shimmer rounded-full w-14 h-14 mx-auto mb-4" />
+          <p className="text-vibe-muted text-base font-medium">Connecting to stream...</p>
+          <p className="text-vibe-muted-dim text-xs mt-2">Establishing live feed from {venue.name}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Offline ─────────────────────────────────────────────────
+
   if (state === "offline") {
     return (
       <div className="relative aspect-video bg-vibe-surface border border-vibe-border flex items-center justify-center overflow-hidden">
@@ -296,7 +509,8 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
     );
   }
 
-  // LIVE — video player (dark area is correct here for video content)
+  // ── LIVE with countdown timer ───────────────────────────────
+
   return (
     <div className="relative aspect-video bg-black overflow-hidden group">
       <video
@@ -314,6 +528,13 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
         <span className="text-white font-bold text-xs tracking-wide uppercase">LIVE</span>
       </div>
 
+      {/* Countdown timer — top center */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md rounded-full px-3 py-1.5 border border-white/10 z-10">
+        <span className="text-white font-bold text-xs tabular-nums tracking-wider">
+          {timeRemaining}s
+        </span>
+      </div>
+
       {/* Viewer count + venue name */}
       <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-md rounded-full px-3 py-1.5 border border-white/10 z-10">
         <svg className="w-3.5 h-3.5 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -329,6 +550,14 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
           <span className="text-white font-semibold text-sm">{venue.name}</span>
           <span className="text-gray-400 text-[11px] font-semibold tracking-wider uppercase">{venue.category}</span>
         </div>
+      </div>
+
+      {/* Preview timer bar — thin progress at bottom */}
+      <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/20 z-20">
+        <div
+          className="h-full bg-vibe-accent transition-all duration-1000 ease-linear"
+          style={{ width: `${(timeRemaining / VIEW_DURATION) * 100}%` }}
+        />
       </div>
     </div>
   );

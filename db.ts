@@ -56,16 +56,30 @@ function initSchema() {
   `);
 
   d.run(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      venue_id INTEGER,
-      expires_at TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      FOREIGN KEY (venue_id) REFERENCES venues(id)
-    )
-  `);
-}
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        venue_id INTEGER,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (venue_id) REFERENCES venues(id)
+      )
+    `);
+
+    d.run(`
+      CREATE TABLE IF NOT EXISTS viewer_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        anonymous_id TEXT NOT NULL,
+        venue_id INTEGER NOT NULL,
+        view_started_at TEXT NOT NULL,
+        view_expires_at TEXT NOT NULL
+      )
+    `);
+    d.run(`
+      CREATE INDEX IF NOT EXISTS idx_viewer_sessions_lookup
+      ON viewer_sessions(anonymous_id, venue_id)
+    `);
+  }
 
 function seedIfEmpty() {
   const row = db.query("SELECT COUNT(*) as c FROM venues").get() as {

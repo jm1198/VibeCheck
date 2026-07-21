@@ -42,6 +42,12 @@ export interface BusinessHours {
   [day: string]: { open: string; close: string };
 }
 
+export interface ViewStatus {
+  allowed: boolean;
+  time_remaining?: number;
+  cooldown_remaining?: number;
+}
+
 export const DAYS = [
   "monday",
   "tuesday",

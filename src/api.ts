@@ -1,4 +1,4 @@
-import type { Venue, User, StreamKeyInfo, HoursCheck } from "./types";
+import type { Venue, User, StreamKeyInfo, HoursCheck, ViewStatus } from "./types";
 
 const BASE = "/api";
 
@@ -84,4 +84,28 @@ export function createVenue(data: {
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+// ─── Viewer session helpers ────────────────────────────────
+
+const VIEWER_ID_KEY = "vibecheck_viewer_id";
+
+export function getViewerId(): string {
+  let id = localStorage.getItem(VIEWER_ID_KEY);
+  if (!id) {
+    id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem(VIEWER_ID_KEY, id);
+  }
+  return id;
+}
+
+export function requestView(venueId: number, viewerId: string): Promise<ViewStatus> {
+  return request<ViewStatus>(`/venues/${venueId}/view`, {
+    method: "POST",
+    body: JSON.stringify({ anonymous_id: viewerId }),
+  });
+}
+
+export function getViewStatus(venueId: number, viewerId: string): Promise<ViewStatus> {
+  return request<ViewStatus>(`/venues/${venueId}/view-status?anonymous_id=${encodeURIComponent(viewerId)}`);
 }
