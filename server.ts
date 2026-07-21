@@ -15,6 +15,11 @@ import {
   getOrCreateLiveStream,
   createLiveStream,
 } from "./src/streaming.ts";
+import {
+  analyzeVenue,
+  getDensityLabel,
+  startBackgroundAnalyzer,
+} from "./src/density.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.argv.includes("--dev");
@@ -634,6 +639,102 @@ app.post("/api/venues/:id/view/complete", (req, res) => {
   res.json({ success: true });
 });
 
+// ─── Crowd Density ──────────────────────────────────────────────
+
+// GET latest density for a venue (public)
+app.get("/api/venues/:id/density", (req, res) => {
+  const venueId = parseInt(req.params.id);
+  const db = getDb();
+
+  // Check cached value on venues table first
+  const venue = db.prepare("SELECT crowd_density, density_updated_at FROM venues WHERE id = ?").get(venueId) as
+    | { crowd_density: number | null; density_updated_at: string | null }
+    | undefined;
+
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+
+  if (venue.crowd_density === null) {
+    res.json(null);
+    return;
+  }
+
+  // Get the latest full record for people_count/label
+  const latest = db
+    .prepare("SELECT * FROM crowd_density WHERE venue_id = ? ORDER BY analyzed_at DESC LIMIT 1")
+    .get(venueId) as {
+      id: number; venue_id: number; people_count: number;
+      density_score: number; analyzed_at: string;
+    } | undefined;
+
+  if (!latest) {
+    res.json(null);
+    return;
+  }
+
+  res.json({
+    venue_id: venueId,
+    people_count: latest.people_count,
+    density_score: latest.density_score,
+    analyzed_at: latest.analyzed_at,
+    label: getDensityLabel(latest.density_score),
+  });
+});
+
+// POST trigger refresh (auth-gated to venue owner)
+app.post("/api/venues/:id/density/refresh", async (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const venueId = parseInt(req.params.id);
+  if (session.venueId !== venueId) {
+    res.status(403).json({ error: "Forbidden — you can only refresh your own venue" });
+    return;
+  }
+
+  const db = getDb();
+  const venue = db.prepare("SELECT id, mux_playback_id FROM venues WHERE id = ?").get(venueId) as
+    | { id: number; mux_playback_id: string | null }
+    | undefined;
+
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+
+  if (!venue.mux_playback_id) {
+    res.status(400).json({ error: "No Mux stream configured for this venue. Set up streaming first." });
+    return;
+  }
+
+  try {
+    const result = await analyzeVenue(venueId, venue.mux_playback_id);
+    if (!result) {
+      res.status(500).json({ error: "Density analysis failed — could not process the thumbnail" });
+      return;
+    }
+
+    // Store in crowd_density table
+    db.prepare(
+      "INSERT INTO crowd_density (venue_id, people_count, density_score, analyzed_at) VALUES (?, ?, ?, ?)"
+    ).run(venueId, result.people_count, result.density_score, result.analyzed_at);
+
+    // Update cached values on venues table
+    db.prepare(
+      "UPDATE venues SET crowd_density = ?, density_updated_at = ? WHERE id = ?"
+    ).run(result.density_score, result.analyzed_at, venueId);
+
+    res.json(result);
+  } catch (err) {
+    console.error("Density refresh error:", err);
+    res.status(500).json({ error: "Density analysis failed", detail: err instanceof Error ? err.message : "Unknown error" });
+  }
+});
+
 // ─── Static files & SPA fallback ───────────────────────────────
 
 async function startServer() {
@@ -723,6 +824,28 @@ async function startServer() {
     console.log("📡 VibeCheck running on http://0.0.0.0:3000");
     if (isDev) console.log("   (dev mode — HMR + WebSocket enabled)");
   });
+
+  // ─── Background Density Analyzer ────────────────────────────
+  startBackgroundAnalyzer(
+    () => {
+      const db = getDb();
+      // Find venues that are live, within business hours, and have a Mux playback ID
+      const venues = db.prepare(
+        "SELECT id, mux_playback_id as playback_id FROM venues WHERE is_live = 1 AND mux_playback_id IS NOT NULL"
+      ).all() as { id: number; playback_id: string | null }[];
+      return venues;
+    },
+    (venueId, result) => {
+      const db = getDb();
+      db.prepare(
+        "INSERT INTO crowd_density (venue_id, people_count, density_score, analyzed_at) VALUES (?, ?, ?, ?)"
+      ).run(venueId, result.people_count, result.density_score, result.analyzed_at);
+      db.prepare(
+        "UPDATE venues SET crowd_density = ?, density_updated_at = ? WHERE id = ?"
+      ).run(result.density_score, result.analyzed_at, venueId);
+    }
+  );
+  console.log("🔍 Background density analyzer started");
 }
 
 startServer().catch((err) => {

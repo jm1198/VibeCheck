@@ -1,5 +1,29 @@
 import type { Venue } from "../types";
 
+function getDensityInfo(score: number | null | undefined) {
+  if (score == null) return null;
+  const colors: Record<number, { dot: string; bg: string; border: string; text: string }> = {
+    1: { dot: "bg-blue-500", bg: "bg-blue-50", border: "border-blue-200", text: "text-blue-700" },
+    2: { dot: "bg-blue-500", bg: "bg-blue-50", border: "border-blue-200", text: "text-blue-700" },
+    3: { dot: "bg-green-500", bg: "bg-green-50", border: "border-green-200", text: "text-green-700" },
+    4: { dot: "bg-green-500", bg: "bg-green-50", border: "border-green-200", text: "text-green-700" },
+    5: { dot: "bg-yellow-500", bg: "bg-yellow-50", border: "border-yellow-200", text: "text-yellow-700" },
+    6: { dot: "bg-yellow-500", bg: "bg-yellow-50", border: "border-yellow-200", text: "text-yellow-700" },
+    7: { dot: "bg-orange-500", bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700" },
+    8: { dot: "bg-orange-500", bg: "bg-orange-50", border: "border-orange-200", text: "text-orange-700" },
+    9: { dot: "bg-red-500", bg: "bg-red-50", border: "border-red-200", text: "text-red-700" },
+    10: { dot: "bg-red-500", bg: "bg-red-50", border: "border-red-200", text: "text-red-700" },
+  };
+  const labels: Record<number, string> = {
+    1: "Empty", 2: "Empty",
+    3: "Quiet", 4: "Quiet",
+    5: "Moderate", 6: "Moderate",
+    7: "Busy", 8: "Busy",
+    9: "Packed", 10: "Packed",
+  };
+  return { ...colors[score] || colors[5], label: labels[score] || "Moderate" };
+}
+
 export default function VenueCard({ venue }: { venue: Venue }) {
   const categoryColors: Record<string, string> = {
     bar: "border-amber-600 text-amber-700",
@@ -56,6 +80,20 @@ export default function VenueCard({ venue }: { venue: Venue }) {
             </span>
           </div>
         )}
+
+        {/* Density badge */}
+        {venue.is_live === 1 && venue.crowd_density != null && (() => {
+          const info = getDensityInfo(venue.crowd_density);
+          if (!info) return null;
+          return (
+            <div className={`absolute bottom-4 right-4 flex items-center gap-1.5 ${info.bg} backdrop-blur-md rounded-full pl-2 pr-3 py-1.5 shadow-md border ${info.border}`}>
+              <span className={`w-2 h-2 rounded-full ${info.dot}`} />
+              <span className={`${info.text} text-xs font-semibold`}>
+                {info.label} {venue.crowd_density}/10
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Category pill — dark outline style, no fill */}
         <div className="absolute bottom-4 left-4">

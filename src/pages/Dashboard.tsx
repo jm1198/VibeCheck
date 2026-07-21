@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { getMe, updateVenue, getVenue, getStreamKey, regenerateStreamKey, getAnalytics } from "../api";
-import type { User, Venue, BusinessHours, StreamKeyInfo, AnalyticsResponse } from "../types";
+import { getMe, updateVenue, getVenue, getStreamKey, regenerateStreamKey, getAnalytics, getDensity, refreshDensity } from "../api";
+import type { User, Venue, BusinessHours, StreamKeyInfo, AnalyticsResponse, CrowdDensity } from "../types";
 import { DAYS } from "../types";
 
 type TabKey = "camera" | "analytics";
@@ -33,6 +33,10 @@ export default function Dashboard() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsPeriod, setAnalyticsPeriod] = useState<"week" | "month" | "all">("week");
 
+  // Density state
+  const [density, setDensity] = useState<CrowdDensity | null>(null);
+  const [densityLoading, setDensityLoading] = useState(false);
+
   useEffect(() => {
     const token = localStorage.getItem("vibecheck_token");
     if (!token) {
@@ -58,6 +62,8 @@ export default function Dashboard() {
           return getStreamKey(v.id).then((info) => {
             setStreamKey(info.stream_key);
             setStreamKeyInfo(info);
+            // Fetch density
+            return getDensity(v.id).then(setDensity).catch(() => {});
           });
         }
       })
@@ -167,6 +173,21 @@ export default function Dashboard() {
       setMessage("❌ " + (err instanceof Error ? err.message : "Failed to regenerate key"));
     } finally {
       setStreamKeyLoading(false);
+    }
+  }
+
+  async function handleRefreshDensity() {
+    if (!venue) return;
+    setDensityLoading(true);
+    setMessage("");
+    try {
+      const result = await refreshDensity(venue.id);
+      setDensity(result);
+      setMessage("✅ Density analysis refreshed");
+    } catch (err) {
+      setMessage("❌ " + (err instanceof Error ? err.message : "Failed to refresh density"));
+    } finally {
+      setDensityLoading(false);
     }
   }
 
@@ -510,6 +531,56 @@ export default function Dashboard() {
                     {venue.viewer_count} viewer{venue.viewer_count !== 1 ? "s" : ""}
                   </span>
                 </div>
+              </div>
+
+              {/* Density Analysis */}
+              <div className="bg-vibe-card border border-vibe-border rounded-2xl p-6 mb-6 mt-6 shadow-card">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold text-vibe-text">Crowd Density</h3>
+                    <p className="text-vibe-muted text-sm mt-1">
+                      {density
+                        ? `Right now: ${density.label} (${density.density_score}/10) · ${density.people_count} people detected`
+                        : "No density data yet. Refresh to analyze your feed."}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleRefreshDensity}
+                    disabled={densityLoading}
+                    className="px-5 py-2.5 rounded-full font-semibold transition-all press-scale bg-vibe-accent hover:bg-vibe-accent-glow text-white shadow-md text-sm disabled:opacity-50"
+                  >
+                    {densityLoading ? "Analyzing..." : "🔄 Refresh"}
+                  </button>
+                </div>
+                {density && (
+                  <div className="mt-4 flex items-center gap-3">
+                    {(() => {
+                      const colorMap: Record<number, string> = {
+                        1: "text-blue-600 bg-blue-100", 2: "text-blue-600 bg-blue-100",
+                        3: "text-green-600 bg-green-100", 4: "text-green-600 bg-green-100",
+                        5: "text-yellow-600 bg-yellow-100", 6: "text-yellow-600 bg-yellow-100",
+                        7: "text-orange-600 bg-orange-100", 8: "text-orange-600 bg-orange-100",
+                        9: "text-red-600 bg-red-100", 10: "text-red-600 bg-red-100",
+                      };
+                      const c = colorMap[density.density_score] || "text-vibe-accent bg-vibe-accent/10";
+                      const secondsAgo = Math.floor((Date.now() - new Date(density.analyzed_at).getTime()) / 1000);
+                      const timeAgo = secondsAgo < 60 ? `${secondsAgo}s ago`
+                        : secondsAgo < 3600 ? `${Math.floor(secondsAgo / 60)}m ago`
+                        : `${Math.floor(secondsAgo / 3600)}h ago`;
+                      return (
+                        <>
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold ${c}`}>
+                            <span className="w-2 h-2 rounded-full bg-current" />
+                            {density.density_score}/10
+                          </span>
+                          <span className="text-vibe-muted-dim text-sm">
+                            Analyzed {timeAgo}
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
 
               {/* Connect Camera — Stream Key & Broadcast */}

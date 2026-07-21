@@ -83,6 +83,27 @@ function initSchema() {
   if (vcCols.length > 0 && !vcCols.some((c) => c.name === "duration_watched")) {
     d.run("ALTER TABLE view_cooldowns ADD COLUMN duration_watched INTEGER NOT NULL DEFAULT 0");
   }
+
+  // ── Crowd density tables ──────────────────────────────────────
+  d.run(`
+    CREATE TABLE IF NOT EXISTS crowd_density (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      venue_id INTEGER NOT NULL,
+      people_count INTEGER NOT NULL DEFAULT 0,
+      density_score INTEGER NOT NULL DEFAULT 0,
+      analyzed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (venue_id) REFERENCES venues(id)
+    )
+  `);
+
+  // Migration: add crowd_density and density_updated_at columns to venues
+  const venueCols = d.prepare("PRAGMA table_info(venues)").all() as { name: string }[];
+  if (!venueCols.some((c) => c.name === "crowd_density")) {
+    d.run("ALTER TABLE venues ADD COLUMN crowd_density INTEGER");
+  }
+  if (!venueCols.some((c) => c.name === "density_updated_at")) {
+    d.run("ALTER TABLE venues ADD COLUMN density_updated_at TEXT");
+  }
 }
 
 function seedIfEmpty() {
@@ -198,8 +219,18 @@ export interface VenueRow {
   owner_email: string;
   business_hours: string;
   stream_key: string | null;
+  crowd_density: number | null;
+  density_updated_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CrowdDensityRow {
+  id: number;
+  venue_id: number;
+  people_count: number;
+  density_score: number;
+  analyzed_at: string;
 }
 
 export interface UserRow {

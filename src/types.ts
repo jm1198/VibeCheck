@@ -10,6 +10,8 @@ export interface Venue {
   owner_email: string;
   business_hours: string;
   stream_key?: string | null;
+  crowd_density?: number | null;
+  density_updated_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -61,4 +63,12 @@ export interface AnalyticsResponse {
   repeat_viewer_rate: number;
   peak_day: string | null;
   peak_hour: number | null;
+}
+
+export interface CrowdDensity {
+  venue_id: number;
+  people_count: number;
+  density_score: number;
+  analyzed_at: string;
+  label: string;
 }

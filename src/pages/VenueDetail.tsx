@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getVenue, getVenues } from "../api";
-import type { Venue } from "../types";
+import { getVenue, getVenues, getDensity } from "../api";
+import type { Venue, CrowdDensity } from "../types";
 import LiveFeed from "../components/LiveFeed";
 import VenueCard from "../components/VenueCard";
 
@@ -10,6 +10,7 @@ export default function VenueDetail() {
   const [venue, setVenue] = useState<Venue | null>(null);
   const [others, setOthers] = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
+  const [density, setDensity] = useState<CrowdDensity | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -18,6 +19,10 @@ export default function VenueDetail() {
       .then(([v, all]) => {
         setVenue(v);
         setOthers(all.filter((o) => o.id !== v.id).slice(0, 3));
+        // Fetch density if venue is live
+        if (v.is_live === 1) {
+          getDensity(v.id).then(setDensity).catch(() => {});
+        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -113,6 +118,39 @@ export default function VenueDetail() {
             )}
           </div>
         </div>
+
+        {/* Density display */}
+        {density && (
+          <div className="mt-4 flex items-center gap-3 p-3 bg-vibe-card border border-vibe-border rounded-xl">
+            {(() => {
+              const colorMap: Record<number, string> = {
+                1: "text-blue-600 bg-blue-100", 2: "text-blue-600 bg-blue-100",
+                3: "text-green-600 bg-green-100", 4: "text-green-600 bg-green-100",
+                5: "text-yellow-600 bg-yellow-100", 6: "text-yellow-600 bg-yellow-100",
+                7: "text-orange-600 bg-orange-100", 8: "text-orange-600 bg-orange-100",
+                9: "text-red-600 bg-red-100", 10: "text-red-600 bg-red-100",
+              };
+              const c = colorMap[density.density_score] || "text-vibe-accent bg-vibe-accent/10";
+              const secondsAgo = Math.floor((Date.now() - new Date(density.analyzed_at).getTime()) / 1000);
+              const timeAgo = secondsAgo < 60
+                ? `${secondsAgo}s ago`
+                : secondsAgo < 3600
+                  ? `${Math.floor(secondsAgo / 60)}m ago`
+                  : `${Math.floor(secondsAgo / 3600)}h ago`;
+              return (
+                <>
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${c}`}>
+                    <span className="w-2 h-2 rounded-full bg-current" />
+                    {density.label} ({density.density_score}/10)
+                  </span>
+                  <span className="text-vibe-muted text-sm">
+                    · {density.people_count} people detected · updated {timeAgo}
+                  </span>
+                </>
+              );
+            })()}
+          </div>
+        )}
 
         <p className="text-vibe-text-secondary mt-4 leading-relaxed text-sm sm:text-base">
           {venue.description}

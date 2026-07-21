@@ -1,4 +1,4 @@
-import type { Venue, User, StreamKeyInfo, HoursCheck, AnalyticsResponse } from "./types";
+import type { Venue, User, StreamKeyInfo, HoursCheck, AnalyticsResponse, CrowdDensity } from "./types";
 
 const BASE = "/api";
 
@@ -100,5 +100,15 @@ export function completeView(
   return request(`/venues/${venueId}/view/complete`, {
     method: "POST",
     body: JSON.stringify({ duration_watched: durationWatched }),
+  });
+}
+
+export function getDensity(venueId: number): Promise<CrowdDensity | null> {
+  return request<CrowdDensity | null>(`/venues/${venueId}/density`);
+}
+
+export function refreshDensity(venueId: number): Promise<CrowdDensity> {
+  return request<CrowdDensity>(`/venues/${venueId}/density/refresh`, {
+    method: "POST",
   });
 }
