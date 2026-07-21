@@ -65,6 +65,24 @@ function initSchema() {
       FOREIGN KEY (venue_id) REFERENCES venues(id)
     )
   `);
+
+  d.run(`
+    CREATE TABLE IF NOT EXISTS view_cooldowns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      venue_id INTEGER NOT NULL,
+      last_viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      duration_watched INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (venue_id) REFERENCES venues(id)
+    )
+  `);
+
+  // Migration: add duration_watched column if missing (for existing DBs)
+  const vcCols = d.prepare("PRAGMA table_info(view_cooldowns)").all() as { name: string }[];
+  if (vcCols.length > 0 && !vcCols.some((c) => c.name === "duration_watched")) {
+    d.run("ALTER TABLE view_cooldowns ADD COLUMN duration_watched INTEGER NOT NULL DEFAULT 0");
+  }
 }
 
 function seedIfEmpty() {

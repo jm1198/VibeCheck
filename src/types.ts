@@ -51,3 +51,14 @@ export const DAYS = [
   "saturday",
   "sunday",
 ] as const;
+
+export interface AnalyticsResponse {
+  total_views: number;
+  unique_viewers: number;
+  views_by_day: { date: string; count: number }[];
+  views_by_hour: { hour: number; count: number }[];
+  avg_view_duration: number;
+  repeat_viewer_rate: number;
+  peak_day: string | null;
+  peak_hour: number | null;
+}

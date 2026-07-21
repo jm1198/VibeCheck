@@ -1,4 +1,4 @@
-import type { Venue, User, StreamKeyInfo, HoursCheck } from "./types";
+import type { Venue, User, StreamKeyInfo, HoursCheck, AnalyticsResponse } from "./types";
 
 const BASE = "/api";
 
@@ -83,5 +83,22 @@ export function createVenue(data: {
   return request<Venue>("/venues", {
     method: "POST",
     body: JSON.stringify(data),
+  });
+}
+
+export function getAnalytics(
+  venueId: number,
+  period: "week" | "month" | "all" = "week"
+): Promise<AnalyticsResponse> {
+  return request<AnalyticsResponse>(`/venues/${venueId}/analytics?period=${period}`);
+}
+
+export function completeView(
+  venueId: number,
+  durationWatched: number
+): Promise<{ success: boolean }> {
+  return request(`/venues/${venueId}/view/complete`, {
+    method: "POST",
+    body: JSON.stringify({ duration_watched: durationWatched }),
   });
 }

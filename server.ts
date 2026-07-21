@@ -481,6 +481,159 @@ app.get("/api/venues/:id/stream-url", (req, res) => {
   }
 });
 
+// ─── Analytics ─────────────────────────────────────────────────
+
+app.get("/api/venues/:id/analytics", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const venueId = parseInt(req.params.id);
+  if (session.venueId !== venueId) {
+    res.status(403).json({ error: "Forbidden — you can only view analytics for your own venue" });
+    return;
+  }
+
+  const db = getDb();
+  const period = (req.query.period as string) || "week";
+
+  // Build date filter
+  let dateFilter = "";
+  if (period === "week") {
+    dateFilter = "AND last_viewed_at >= datetime('now', '-7 days')";
+  } else if (period === "month") {
+    dateFilter = "AND last_viewed_at >= datetime('now', '-30 days')";
+  }
+  // "all" has no filter
+
+  const rows = db
+    .prepare(
+      `SELECT user_id, last_viewed_at, duration_watched
+       FROM view_cooldowns
+       WHERE venue_id = ? ${dateFilter}
+       ORDER BY last_viewed_at ASC`
+    )
+    .all(venueId) as { user_id: number; last_viewed_at: string; duration_watched: number }[];
+
+  if (rows.length === 0) {
+    res.json({
+      total_views: 0,
+      unique_viewers: 0,
+      views_by_day: [],
+      views_by_hour: [],
+      avg_view_duration: 0,
+      repeat_viewer_rate: 0,
+      peak_day: null,
+      peak_hour: null,
+    });
+    return;
+  }
+
+  // Total views
+  const totalViews = rows.length;
+
+  // Unique viewers
+  const uniqueUsers = new Set(rows.map((r) => r.user_id));
+  const uniqueViewers = uniqueUsers.size;
+
+  // Views by day
+  const dayMap = new Map<string, number>();
+  for (const r of rows) {
+    const day = r.last_viewed_at.slice(0, 10); // YYYY-MM-DD
+    dayMap.set(day, (dayMap.get(day) || 0) + 1);
+  }
+  const viewsByDay = Array.from(dayMap.entries())
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Views by hour (0-23)
+  const hourCounts = new Array(24).fill(0);
+  for (const r of rows) {
+    const hour = parseInt(r.last_viewed_at.slice(11, 13), 10);
+    if (!isNaN(hour) && hour >= 0 && hour < 24) {
+      hourCounts[hour]++;
+    }
+  }
+  const viewsByHour = hourCounts.map((count, hour) => ({ hour, count }));
+  const peakHour = hourCounts.indexOf(Math.max(...hourCounts));
+
+  // Peak day
+  let peakDay: string | null = null;
+  let peakDayCount = 0;
+  for (const [day, count] of dayMap) {
+    if (count > peakDayCount) {
+      peakDayCount = count;
+      peakDay = day;
+    }
+  }
+
+  // Average view duration (only rows with duration > 0)
+  const durations = rows.filter((r) => r.duration_watched > 0).map((r) => r.duration_watched);
+  const avgViewDuration = durations.length > 0
+    ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+    : 0;
+
+  // Repeat viewer rate: % of users who viewed more than once
+  const userViewCounts = new Map<number, number>();
+  for (const r of rows) {
+    userViewCounts.set(r.user_id, (userViewCounts.get(r.user_id) || 0) + 1);
+  }
+  let repeatCount = 0;
+  for (const count of userViewCounts.values()) {
+    if (count > 1) repeatCount++;
+  }
+  const repeatViewerRate = uniqueViewers > 0
+    ? Math.round((repeatCount / uniqueViewers) * 100)
+    : 0;
+
+  res.json({
+    total_views: totalViews,
+    unique_viewers: uniqueViewers,
+    views_by_day: viewsByDay,
+    views_by_hour: viewsByHour,
+    avg_view_duration: avgViewDuration,
+    repeat_viewer_rate: repeatViewerRate,
+    peak_day: peakDay,
+    peak_hour: peakHour,
+  });
+});
+
+// POST view completion — records duration a user actually watched
+app.post("/api/venues/:id/view/complete", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const venueId = parseInt(req.params.id);
+  const db = getDb();
+  const { duration_watched } = req.body;
+
+  if (typeof duration_watched !== "number" || duration_watched < 0) {
+    res.status(400).json({ error: "duration_watched must be a non-negative number" });
+    return;
+  }
+
+  // Upsert: update existing or insert new row
+  const existing = db
+    .prepare("SELECT id, duration_watched FROM view_cooldowns WHERE user_id = ? AND venue_id = ?")
+    .get(session.userId, venueId) as { id: number; duration_watched: number } | undefined;
+
+  if (existing) {
+    // Add to existing duration (cumulative for the session)
+    db.prepare(
+      "UPDATE view_cooldowns SET duration_watched = duration_watched + ?, last_viewed_at = datetime('now') WHERE id = ?"
+    ).run(duration_watched, existing.id);
+  } else {
+    db.prepare(
+      "INSERT INTO view_cooldowns (user_id, venue_id, duration_watched, last_viewed_at) VALUES (?, ?, ?, datetime('now'))"
+    ).run(session.userId, venueId, duration_watched);
+  }
+
+  res.json({ success: true });
+});
+
 // ─── Static files & SPA fallback ───────────────────────────────
 
 async function startServer() {

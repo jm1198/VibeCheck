@@ -124,6 +124,15 @@ function generateThumbnail(id: number): string {
   </svg>`;
 }
 
+// In-memory view tracking for analytics
+interface ViewRecord {
+  user_id: number;
+  venue_id: number;
+  last_viewed_at: string;
+  duration_watched: number;
+}
+const viewRecords: ViewRecord[] = [];
+
 function json(res: any, status: number, data: any) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -207,6 +216,95 @@ export default async function handler(req: any, res: any) {
       // GET /api/auth/me
       if (pathname === "/api/auth/me" && req.method === "GET") {
         return json(res, 200, { id: demoUser.id, email: demoUser.email, venue_id: demoUser.venue_id });
+      }
+
+      // GET /api/venues/:id/analytics
+      const analyticsMatch = pathname.match(/^\/api\/venues\/(\d+)\/analytics$/);
+      if (analyticsMatch && req.method === "GET") {
+        const venueId = parseInt(analyticsMatch[1]);
+        const period = url.searchParams.get("period") || "week";
+
+        let dateFilter: (r: ViewRecord) => boolean;
+        if (period === "week") {
+          const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+          dateFilter = (r) => r.last_viewed_at >= weekAgo;
+        } else if (period === "month") {
+          const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+          dateFilter = (r) => r.last_viewed_at >= monthAgo;
+        } else {
+          dateFilter = () => true;
+        }
+
+        const rows = viewRecords
+          .filter((r) => r.venue_id === venueId && dateFilter(r))
+          .sort((a, b) => a.last_viewed_at.localeCompare(b.last_viewed_at));
+
+        if (rows.length === 0) {
+          return json(res, 200, {
+            total_views: 0, unique_viewers: 0, views_by_day: [], views_by_hour: [],
+            avg_view_duration: 0, repeat_viewer_rate: 0, peak_day: null, peak_hour: null,
+          });
+        }
+
+        const totalViews = rows.length;
+        const uniqueViewers = new Set(rows.map((r) => r.user_id)).size;
+
+        const dayMap = new Map<string, number>();
+        for (const r of rows) {
+          const day = r.last_viewed_at.slice(0, 10);
+          dayMap.set(day, (dayMap.get(day) || 0) + 1);
+        }
+        const viewsByDay = Array.from(dayMap.entries())
+          .map(([date, count]) => ({ date, count }))
+          .sort((a, b) => a.date.localeCompare(b.date));
+
+        const hourCounts = new Array(24).fill(0);
+        for (const r of rows) {
+          const hour = parseInt(r.last_viewed_at.slice(11, 13), 10);
+          if (!isNaN(hour) && hour >= 0 && hour < 24) hourCounts[hour]++;
+        }
+        const viewsByHour = hourCounts.map((count, hour) => ({ hour, count }));
+        const peakHour = hourCounts.indexOf(Math.max(...hourCounts));
+
+        let peakDay: string | null = null;
+        let peakDayCount = 0;
+        for (const [day, count] of dayMap) {
+          if (count > peakDayCount) { peakDayCount = count; peakDay = day; }
+        }
+
+        const durations = rows.filter((r) => r.duration_watched > 0).map((r) => r.duration_watched);
+        const avgViewDuration = durations.length > 0
+          ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
+
+        const userViewCounts = new Map<number, number>();
+        for (const r of rows) userViewCounts.set(r.user_id, (userViewCounts.get(r.user_id) || 0) + 1);
+        let repeatCount = 0;
+        for (const c of userViewCounts.values()) if (c > 1) repeatCount++;
+        const repeatViewerRate = uniqueViewers > 0 ? Math.round((repeatCount / uniqueViewers) * 100) : 0;
+
+        return json(res, 200, {
+          total_views: totalViews, unique_viewers: uniqueViewers, views_by_day: viewsByDay,
+          views_by_hour: viewsByHour, avg_view_duration: avgViewDuration,
+          repeat_viewer_rate: repeatViewerRate, peak_day: peakDay, peak_hour: peakHour,
+        });
+      }
+
+      // POST /api/venues/:id/view/complete
+      const viewCompleteMatch = pathname.match(/^\/api\/venues\/(\d+)\/view\/complete$/);
+      if (viewCompleteMatch && req.method === "POST") {
+        const venueId = parseInt(viewCompleteMatch[1]);
+        const body = await readBody(req);
+        const duration_watched = body.duration_watched;
+        if (typeof duration_watched !== "number" || duration_watched < 0) {
+          return json(res, 400, { error: "duration_watched must be a non-negative number" });
+        }
+        viewRecords.push({
+          user_id: demoUser.id,
+          venue_id: venueId,
+          last_viewed_at: new Date().toISOString(),
+          duration_watched,
+        });
+        return json(res, 200, { success: true });
       }
 
       // Fallback for unknown API routes

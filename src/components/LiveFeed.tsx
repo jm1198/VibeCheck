@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Hls from "hls.js";
 import type { Venue, HoursCheck } from "../types";
-import { checkHours } from "../api";
+import { checkHours, completeView } from "../api";
 
 interface LiveFeedProps {
   venue: Venue;
@@ -27,6 +27,10 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
   const [hoursInfo, setHoursInfo] = useState<HoursCheck | null>(null);
   const [viewerCount, setViewerCount] = useState(venue.viewer_count);
   const [errorMsg, setErrorMsg] = useState("");
+
+  // View duration tracking
+  const viewStartRef = useRef<number | null>(null);
+  const reportedDurationRef = useRef<number>(0);
 
   // Check business hours
   useEffect(() => {
@@ -224,6 +228,31 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
       }
     };
   }, [venue.id, isEffectivelyLive, startHlsStream, setupWebSocketStream]);
+
+  // ─── View duration tracking & completion ────────────────────
+
+  // Start tracking when stream goes live
+  useEffect(() => {
+    if (state === "live") {
+      viewStartRef.current = Date.now();
+      reportedDurationRef.current = 0;
+    }
+  }, [state]);
+
+  // Send view completion on unmount or when leaving live state
+  useEffect(() => {
+    return () => {
+      if (viewStartRef.current !== null) {
+        const totalDuration = Math.floor((Date.now() - viewStartRef.current) / 1000);
+        const unreported = totalDuration - reportedDurationRef.current;
+        if (unreported > 0 && venue.id) {
+          // Fire-and-forget — don't block unmount
+          completeView(venue.id, unreported).catch(() => {});
+        }
+        viewStartRef.current = null;
+      }
+    };
+  }, [venue.id]);
 
   // ─── Render states ───────────────────────────────────────────
 
