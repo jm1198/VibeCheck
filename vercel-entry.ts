@@ -191,15 +191,15 @@ export default async function handler(req: any, res: any) {
 
       // GET /api/venues/:id
       const venueMatch = pathname.match(/^\/api\/venues\/(\d+)$/);
-      const viewMatch = venueMatch && pathname.endsWith("/view");
-      if (venueMatch && !viewMatch && req.method === "GET") {
+      const viewMatch = pathname.match(/^\/api\/venues\/(\d+)\/view$/);
+      if (venueMatch && req.method === "GET") {
         const v = venues.find((v) => v.id === parseInt(venueMatch[1]));
         if (!v) return json(res, 404, { error: "Venue not found" });
         return json(res, 200, v);
       }
 
       // PATCH /api/venues/:id
-      if (venueMatch && !viewMatch && req.method === "PATCH") {
+      if (venueMatch && req.method === "PATCH") {
         const v = venues.find((v) => v.id === parseInt(venueMatch[1]));
         if (!v) return json(res, 404, { error: "Venue not found" });
         const body = await readBody(req);
@@ -209,12 +209,12 @@ export default async function handler(req: any, res: any) {
       }
 
       // POST /api/venues/:id/view — auth-required view with cooldown
-      if (venueMatch && pathname.endsWith("/view") && req.method === "POST") {
+      if (viewMatch && req.method === "POST") {
         const session = getSessionUser(req);
         if (!session) {
           return json(res, 401, { error: "Sign in required to watch live feeds" });
         }
-        const vId = parseInt(venueMatch[1]);
+        const vId = parseInt(viewMatch[1]);
         const v = venues.find((v) => v.id === vId);
         if (!v) return json(res, 404, { error: "Venue not found" });
 
