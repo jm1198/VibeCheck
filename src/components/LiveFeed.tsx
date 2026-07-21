@@ -28,6 +28,31 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
   const [viewerCount, setViewerCount] = useState(venue.viewer_count);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // ─── Promo overlay visibility cycling ───────────────────────
+  const [showPromo, setShowPromo] = useState(false);
+  const promoText = venue.promo_text;
+
+  useEffect(() => {
+    if (state !== "live" || !promoText) {
+      setShowPromo(false);
+      return;
+    }
+    // Show for 5s, hide for 10s, repeat
+    let timeout: ReturnType<typeof setTimeout>;
+    let visible = true;
+    setShowPromo(true);
+
+    function cycle() {
+      visible = !visible;
+      setShowPromo(visible);
+      timeout = setTimeout(cycle, visible ? 5000 : 10000);
+    }
+
+    timeout = setTimeout(cycle, 5000);
+
+    return () => clearTimeout(timeout);
+  }, [state, promoText]);
+
   // View duration tracking
   const viewStartRef = useRef<number | null>(null);
   const reportedDurationRef = useRef<number>(0);
@@ -359,6 +384,21 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
           <span className="text-gray-400 text-[11px] font-semibold tracking-wider uppercase">{venue.category}</span>
         </div>
       </div>
+
+      {/* Promo overlay bar */}
+      {promoText && (
+        <div
+          className={`absolute bottom-0 left-0 right-0 z-20 transition-all duration-500 ease-out ${
+            showPromo
+              ? "translate-y-0 opacity-100"
+              : "translate-y-full opacity-0 pointer-events-none"
+          }`}
+        >
+          <div className="bg-black/40 backdrop-blur-sm text-white rounded-b-xl py-2 px-4 mx-0">
+            <p className="text-sm font-medium text-center font-['DM_Sans']">{promoText}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

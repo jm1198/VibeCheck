@@ -138,6 +138,9 @@ function initSchema() {
   if (!venueCols.some((c) => c.name === "density_updated_at")) {
     d.run("ALTER TABLE venues ADD COLUMN density_updated_at TEXT");
   }
+  if (!venueCols.some((c) => c.name === "promo_text")) {
+    d.run("ALTER TABLE venues ADD COLUMN promo_text TEXT");
+  }
 
   // ── Favorites table ──────────────────────────────────────────
   d.run(`
@@ -295,6 +298,7 @@ export interface VenueRow {
   longitude: number | null;
   crowd_density: number | null;
   density_updated_at: string | null;
+  promo_text: string | null;
   created_at: string;
   updated_at: string;
 }

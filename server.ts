@@ -631,6 +631,65 @@ app.get("/api/venues/:id/hours-check", (req, res) => {
 
 // ─── Stream URL (Mux integration) ─────────────────────────
 
+// ─── Promo Overlay ────────────────────────────────────────────
+
+// GET promo text for a venue (public)
+app.get("/api/venues/:id/promo", (req, res) => {
+  const venueId = parseInt(req.params.id);
+  const db = getDb();
+  const venue = db.prepare("SELECT promo_text FROM venues WHERE id = ?").get(venueId) as
+    | { promo_text: string | null }
+    | undefined;
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+  res.json({ promo_text: venue.promo_text });
+});
+
+// PATCH promo text (auth-gated to venue owner)
+app.patch("/api/venues/:id/promo", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const venueId = parseInt(req.params.id);
+  if (session.venueId !== venueId) {
+    res.status(403).json({ error: "Forbidden — you can only update your own venue" });
+    return;
+  }
+
+  const { promo_text } = req.body;
+  const db = getDb();
+
+  const venue = db.prepare("SELECT id FROM venues WHERE id = ?").get(venueId) as
+    | { id: number }
+    | undefined;
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+
+  if (promo_text !== undefined && promo_text !== null && promo_text !== "") {
+    if (typeof promo_text !== "string" || promo_text.length > 80) {
+      res.status(400).json({ error: "promo_text must be a string of 80 characters or fewer" });
+      return;
+    }
+    db.prepare("UPDATE venues SET promo_text = ?, updated_at = datetime('now') WHERE id = ?").run(promo_text, venueId);
+  } else {
+    // Clear the promo text
+    db.prepare("UPDATE venues SET promo_text = NULL, updated_at = datetime('now') WHERE id = ?").run(venueId);
+  }
+
+  const updated = db.prepare("SELECT promo_text FROM venues WHERE id = ?").get(venueId) as
+    | { promo_text: string | null }
+    | undefined;
+  res.json({ promo_text: updated?.promo_text ?? null });
+});
+
+// ─── Stream URL (Mux integration) ─────────────────────────
+
 app.get("/api/venues/:id/stream-url", (req, res) => {
   const venueId = parseInt(req.params.id);
   if (isConfigured()) {

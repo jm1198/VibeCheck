@@ -14,6 +14,7 @@ export interface Venue {
   longitude?: number | null;
   crowd_density?: number | null;
   density_updated_at?: string | null;
+  promo_text?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -165,3 +165,19 @@ export function unsubscribePush(endpoint: string): Promise<{ success: boolean }>
 export function getVapidPublicKey(): Promise<{ publicKey: string }> {
   return request<{ publicKey: string }>("/push/vapid-public-key");
 }
+
+// ── Promo Overlay ────────────────────────────────────────────
+
+export function setPromo(
+  venueId: number,
+  promo_text: string | null
+): Promise<{ promo_text: string | null }> {
+  return request<{ promo_text: string | null }>(`/venues/${venueId}/promo`, {
+    method: "PATCH",
+    body: JSON.stringify({ promo_text }),
+  });
+}
+
+export function getPromo(venueId: number): Promise<{ promo_text: string | null }> {
+  return request<{ promo_text: string | null }>(`/venues/${venueId}/promo`);
+}

@@ -28,6 +28,7 @@ const venues = [
     business_hours: "{}",
     latitude: 32.7115,
     longitude: -117.1587,
+    promo_text: null,
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -44,6 +45,7 @@ const venues = [
     business_hours: "{}",
     latitude: 32.7120,
     longitude: -117.1595,
+    promo_text: null,
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -60,6 +62,7 @@ const venues = [
     business_hours: "{}",
     latitude: 32.7457,
     longitude: -117.1295,
+    promo_text: null,
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -76,6 +79,7 @@ const venues = [
     business_hours: "{}",
     latitude: 32.7952,
     longitude: -117.2547,
+    promo_text: null,
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -92,6 +96,7 @@ const venues = [
     business_hours: "{}",
     latitude: 32.7110,
     longitude: -117.1575,
+    promo_text: null,
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -299,6 +304,13 @@ export default async function handler(req: any, res: any) {
         const wasLive = v.is_live === 1;
         if (body.is_live !== undefined) v.is_live = body.is_live ? 1 : 0;
         if (body.description) v.description = body.description;
+        if (body.promo_text !== undefined) {
+          const pt = body.promo_text;
+          if (pt !== null && pt !== "" && (typeof pt !== "string" || pt.length > 80)) {
+            return json(res, 400, { error: "promo_text must be a string of 80 characters or fewer" });
+          }
+          (v as any).promo_text = pt || null;
+        }
         // Note: push notifications for go-live are handled in server.ts (Express)
         // Vercel serverless doesn't persist subscriptions between cold starts
         if (!wasLive && v.is_live === 1) {
@@ -506,6 +518,37 @@ export default async function handler(req: any, res: any) {
           duration_watched,
         });
         return json(res, 200, { success: true });
+      }
+
+      // GET /api/venues/:id/promo
+      const promoMatch = pathname.match(/^\/api\/venues\/(\d+)\/promo$/);
+      if (promoMatch && req.method === "GET") {
+        const v = venues.find((v) => v.id === parseInt(promoMatch[1]));
+        if (!v) return json(res, 404, { error: "Venue not found" });
+        return json(res, 200, { promo_text: (v as any).promo_text ?? null });
+      }
+
+      // PATCH /api/venues/:id/promo — auth-gated to venue owner
+      if (promoMatch && req.method === "PATCH") {
+        const session = getSessionUser(req);
+        if (!session) return json(res, 401, { error: "Unauthorized" });
+        const venueId = parseInt(promoMatch[1]);
+        if (session.venueId !== venueId) {
+          return json(res, 403, { error: "Forbidden — you can only update your own venue" });
+        }
+        const v = venues.find((v) => v.id === venueId);
+        if (!v) return json(res, 404, { error: "Venue not found" });
+        const body = await readBody(req);
+        const pt = body.promo_text;
+        if (pt !== undefined && pt !== null && pt !== "") {
+          if (typeof pt !== "string" || pt.length > 80) {
+            return json(res, 400, { error: "promo_text must be a string of 80 characters or fewer" });
+          }
+          (v as any).promo_text = pt;
+        } else {
+          (v as any).promo_text = null;
+        }
+        return json(res, 200, { promo_text: (v as any).promo_text ?? null });
       }
 
       // GET /api/venues/:id/density

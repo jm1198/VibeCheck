@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { getMe, updateVenue, getVenue, getStreamKey, regenerateStreamKey, getAnalytics, getDensity, refreshDensity } from "../api";
+import { getMe, updateVenue, getVenue, getStreamKey, regenerateStreamKey, getAnalytics, getDensity, refreshDensity, setPromo, getPromo } from "../api";
 import type { User, Venue, BusinessHours, StreamKeyInfo, AnalyticsResponse, CrowdDensity } from "../types";
 import { DAYS } from "../types";
 
@@ -37,6 +37,10 @@ export default function Dashboard() {
   const [density, setDensity] = useState<CrowdDensity | null>(null);
   const [densityLoading, setDensityLoading] = useState(false);
 
+  // Promo state
+  const [promoText, setPromoText] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
+
   useEffect(() => {
     const token = localStorage.getItem("vibecheck_token");
     if (!token) {
@@ -64,6 +68,12 @@ export default function Dashboard() {
             setStreamKeyInfo(info);
             // Fetch density
             return getDensity(v.id).then(setDensity).catch(() => {});
+          })
+          .then(() => {
+            // Fetch promo text
+            if (v && v.id) {
+              return getPromo(v.id).then((p) => setPromoText(p.promo_text || "")).catch(() => {});
+            }
           });
         }
       })
@@ -725,6 +735,114 @@ export default function Dashboard() {
                 >
                   {saving ? "Saving..." : "Save Hours"}
                 </button>
+              </div>
+            </div>
+
+            {/* ═══ section: Promo Overlay ═══ */}
+            <div className="mb-10">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-pink-50 flex items-center justify-center shrink-0">
+                  <svg className="w-5 h-5 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-vibe-text">Promo Overlay</h2>
+                  <p className="text-vibe-muted text-sm">Add promotional text to your live feed</p>
+                </div>
+              </div>
+
+              <div className="bg-vibe-card border border-vibe-border rounded-2xl p-6 shadow-card">
+                <div className="mb-4">
+                  <label className="text-sm font-semibold text-vibe-text block mb-2">
+                    Promo Message
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={promoText}
+                      onChange={(e) => {
+                        if (e.target.value.length <= 80) setPromoText(e.target.value);
+                      }}
+                      placeholder='e.g. "Happy hour until 7pm!"'
+                      maxLength={80}
+                      className="w-full bg-vibe-bg border border-vibe-border rounded-xl px-4 py-3 text-vibe-text text-sm pr-16 focus:outline-none focus:border-vibe-accent focus:ring-1 focus:ring-vibe-accent/20 transition-colors"
+                    />
+                    <span
+                      className={`absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium tabular-nums ${
+                        promoText.length > 70 ? "text-amber-600" : "text-vibe-muted-dim"
+                      }`}
+                    >
+                      {promoText.length}/80
+                    </span>
+                  </div>
+                  <p className="text-vibe-muted-dim text-xs mt-2">
+                    Appears at the bottom of your live feed. Max 80 characters.
+                  </p>
+                </div>
+
+                {/* Preview */}
+                {promoText && (
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-vibe-muted uppercase tracking-wider mb-2">Preview</p>
+                    <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
+                      {/* Simulated video area */}
+                      <div className="absolute inset-0 bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center">
+                        <p className="text-white/20 text-sm">Live Feed Preview</p>
+                      </div>
+                      {/* Simulated promo bar */}
+                      <div className="absolute bottom-0 left-0 right-0">
+                        <div className="bg-black/40 backdrop-blur-sm text-white rounded-b-xl py-2 px-4">
+                          <p className="text-sm font-medium text-center">{promoText}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Buttons */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={async () => {
+                      if (!venue) return;
+                      setPromoLoading(true);
+                      setMessage("");
+                      try {
+                        const result = await setPromo(venue.id, promoText || null);
+                        setPromoText(result.promo_text || "");
+                        setMessage(result.promo_text ? "✅ Promo overlay saved" : "✅ Promo overlay cleared");
+                      } catch (err) {
+                        setMessage("❌ " + (err instanceof Error ? err.message : "Failed to save promo"));
+                      } finally {
+                        setPromoLoading(false);
+                      }
+                    }}
+                    disabled={promoLoading}
+                    className="bg-vibe-accent hover:bg-vibe-accent-glow text-white font-semibold rounded-full px-5 py-2.5 transition-all text-sm shadow-md disabled:opacity-50 press-scale"
+                  >
+                    {promoLoading ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!venue) return;
+                      setPromoLoading(true);
+                      setMessage("");
+                      try {
+                        await setPromo(venue.id, null);
+                        setPromoText("");
+                        setMessage("✅ Promo overlay cleared");
+                      } catch (err) {
+                        setMessage("❌ " + (err instanceof Error ? err.message : "Failed to clear promo"));
+                      } finally {
+                        setPromoLoading(false);
+                      }
+                    }}
+                    disabled={promoLoading || !promoText}
+                    className="text-sm text-vibe-muted hover:text-red-500 border border-vibe-border hover:border-red-300 rounded-full px-5 py-2.5 transition-all disabled:opacity-30"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             </div>
 
