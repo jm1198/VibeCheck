@@ -40,6 +40,7 @@ export interface User {
   id: number;
   email: string;
   venue_id: number | null;
+  role: string;
 }
 
 export interface BusinessHours {
