@@ -1,10 +1,10 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { getMe, updateVenue, getVenue, getStreamKey, regenerateStreamKey, getAnalytics, getDensity, refreshDensity, setPromo, getPromo } from "../api";
-import type { User, Venue, BusinessHours, StreamKeyInfo, AnalyticsResponse, CrowdDensity } from "../types";
+import { getMe, updateVenue, getVenue, getStreamKey, regenerateStreamKey, getAnalytics, getDensity, refreshDensity, setPromo, getPromo, getCheckInCode, getCheckIns } from "../api";
+import type { User, Venue, BusinessHours, StreamKeyInfo, AnalyticsResponse, CrowdDensity, CheckInCodeResponse, CheckInStats } from "../types";
 import { DAYS } from "../types";
 
-type TabKey = "camera" | "analytics";
+type TabKey = "camera" | "analytics" | "checkins";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -40,6 +40,11 @@ export default function Dashboard() {
   // Promo state
   const [promoText, setPromoText] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
+
+  // Check-in state
+  const [checkInCode, setCheckInCode] = useState<string | null>(null);
+  const [checkInStats, setCheckInStats] = useState<CheckInStats | null>(null);
+  const [checkInLoading, setCheckInLoading] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("vibecheck_token");
@@ -107,6 +112,23 @@ export default function Dashboard() {
         .finally(() => setAnalyticsLoading(false));
     }
   }, [activeTab, analyticsPeriod, venue?.id]);
+
+  // Fetch check-in data when tab changes
+  useEffect(() => {
+    if (activeTab === "checkins" && venue) {
+      setCheckInLoading(true);
+      Promise.all([
+        getCheckInCode(venue.id).catch(() => null),
+        getCheckIns(venue.id).catch(() => null),
+      ])
+        .then(([codeRes, statsRes]) => {
+          if (codeRes) setCheckInCode(codeRes.check_in_code);
+          if (statsRes) setCheckInStats(statsRes);
+        })
+        .catch(() => {})
+        .finally(() => setCheckInLoading(false));
+    }
+  }, [activeTab, venue?.id]);
 
   async function toggleLive() {
     if (!venue) return;
@@ -479,6 +501,16 @@ export default function Dashboard() {
             }`}
           >
             📊 Analytics
+          </button>
+          <button
+            onClick={() => setActiveTab("checkins")}
+            className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 -mb-px ${
+              activeTab === "checkins"
+                ? "border-vibe-accent text-vibe-accent"
+                : "border-transparent text-vibe-muted hover:text-vibe-text"
+            }`}
+          >
+            📱 Check-Ins
           </button>
         </div>
 
@@ -998,6 +1030,78 @@ export default function Dashboard() {
                 </div>
               </>
             ) : null}
+          </div>
+        )}
+
+        {/* ═══ Tab Content: Check-Ins ═══ */}
+        {activeTab === "checkins" && (
+          <div className="animate-fade-up">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold text-vibe-text">Check-Ins</h2>
+              <p className="text-vibe-muted text-sm">QR code for customer drink discounts</p>
+            </div>
+
+            {checkInLoading ? (
+              <div className="shimmer rounded-2xl h-64" />
+            ) : (
+              <>
+                {/* QR Code Card */}
+                <div className="bg-vibe-card border border-vibe-border rounded-2xl p-6 shadow-card mb-6 text-center">
+                  <h3 className="text-base font-semibold text-vibe-text mb-4">Your Check-In QR Code</h3>
+                  {checkInCode ? (
+                    <>
+                      <div className="inline-block bg-white p-4 rounded-xl border border-vibe-border mb-4">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                            `${window.location.origin}/check-in/${checkInCode}`
+                          )}`}
+                          alt="Check-in QR Code"
+                          className="w-48 h-48"
+                          crossOrigin="anonymous"
+                        />
+                      </div>
+                      <p className="text-vibe-muted text-sm mb-1">
+                        Code: <code className="text-vibe-accent font-mono bg-vibe-surface px-2 py-0.5 rounded text-sm">{checkInCode}</code>
+                      </p>
+                      <p className="text-vibe-muted-dim text-xs mb-5">
+                        Customers scan to check in and get a drink discount
+                      </p>
+                      <button
+                        onClick={() => {
+                          const link = document.createElement("a");
+                          link.href = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(
+                            `${window.location.origin}/check-in/${checkInCode}`
+                          )}`;
+                          link.download = `vibecheck-qr-${checkInCode}.png`;
+                          link.click();
+                        }}
+                        className="bg-vibe-accent hover:bg-vibe-accent-glow text-white font-semibold rounded-full px-5 py-2.5 transition-all text-sm shadow-md press-scale"
+                      >
+                        📥 Download QR Code
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-vibe-muted text-sm py-8">No check-in code generated yet. Toggle your feed live first.</p>
+                  )}
+                </div>
+
+                {/* Stats Cards */}
+                {checkInStats && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-vibe-card border border-vibe-border rounded-2xl p-5 shadow-card text-center">
+                      <p className="text-vibe-muted-dim text-xs uppercase tracking-wider mb-2">This Week</p>
+                      <p className="text-4xl font-bold text-vibe-accent font-[Playfair_Display]">{checkInStats.check_ins_this_week}</p>
+                      <p className="text-vibe-muted-dim text-xs mt-1">check-ins</p>
+                    </div>
+                    <div className="bg-vibe-card border border-vibe-border rounded-2xl p-5 shadow-card text-center">
+                      <p className="text-vibe-muted-dim text-xs uppercase tracking-wider mb-2">All Time</p>
+                      <p className="text-4xl font-bold text-vibe-accent font-[Playfair_Display]">{checkInStats.total_check_ins}</p>
+                      <p className="text-vibe-muted-dim text-xs mt-1">check-ins</p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

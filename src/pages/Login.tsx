@@ -27,6 +27,7 @@ declare global {
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { isLoggedIn, user, refresh } = useAuth();
 
   const [email, setEmail] = useState("");
@@ -36,18 +37,25 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Redirect after login — check for ?redirect= param
+  const redirectTo = searchParams.get("redirect") || null;
+
   // Determine account type from URL: /dashboard = venue_owner, /login = consumer
   const isDashboardPath = location.pathname === "/dashboard";
 
   // Redirect if already logged in
   useEffect(() => {
     if (!isLoggedIn || !user) return;
+    if (redirectTo) {
+      navigate(redirectTo, { replace: true });
+      return;
+    }
     if (user.role === "venue_owner" && user.venue_id) {
       navigate("/dashboard/manage", { replace: true });
     } else {
       navigate("/", { replace: true });
     }
-  }, [isLoggedIn, user, navigate]);
+  }, [isLoggedIn, user, navigate, redirectTo]);
 
   // Set account type based on path
   useEffect(() => {
@@ -115,7 +123,7 @@ export default function Login() {
       const result = await googleLogin(response.credential);
       localStorage.setItem("vibecheck_token", result.token);
       await refresh();
-      navigate("/", { replace: true });
+      navigate(redirectTo || "/", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Google sign-in failed");
     } finally {
@@ -132,7 +140,9 @@ export default function Login() {
         const result = await login(email, password);
         localStorage.setItem("vibecheck_token", result.token);
         await refresh();
-        if (result.role === "venue_owner" && result.venue_id) {
+        if (redirectTo) {
+          navigate(redirectTo, { replace: true });
+        } else if (result.role === "venue_owner" && result.venue_id) {
           navigate("/dashboard/manage", { replace: true });
         } else {
           navigate("/", { replace: true });
@@ -144,7 +154,9 @@ export default function Login() {
         const loginResult = await login(email, password);
         localStorage.setItem("vibecheck_token", loginResult.token);
         await refresh();
-        if (role === "venue_owner") {
+        if (redirectTo) {
+          navigate(redirectTo, { replace: true });
+        } else if (role === "venue_owner") {
           navigate("/setup", { replace: true });
         } else {
           navigate("/", { replace: true });

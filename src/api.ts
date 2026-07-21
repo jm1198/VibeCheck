@@ -1,4 +1,4 @@
-import type { Venue, User, StreamKeyInfo, HoursCheck, AnalyticsResponse, CrowdDensity } from "./types";
+import type { Venue, User, StreamKeyInfo, HoursCheck, AnalyticsResponse, CrowdDensity, CheckInCodeResponse, CheckInResponse, CheckInStats } from "./types";
 
 const BASE = "/api";
 
@@ -180,4 +180,20 @@ export function setPromo(
 
 export function getPromo(venueId: number): Promise<{ promo_text: string | null }> {
   return request<{ promo_text: string | null }>(`/venues/${venueId}/promo`);
+}
+
+// ── Check-Ins ──────────────────────────────────────────────────
+
+export function getCheckInCode(venueId: number): Promise<CheckInCodeResponse> {
+  return request<CheckInCodeResponse>(`/venues/${venueId}/check-in-code`);
+}
+
+export function checkIn(code: string): Promise<CheckInResponse> {
+  return request<CheckInResponse>(`/check-in/${encodeURIComponent(code)}`, {
+    method: "POST",
+  });
+}
+
+export function getCheckIns(venueId: number): Promise<CheckInStats> {
+  return request<CheckInStats>(`/venues/${venueId}/check-ins`);
 }

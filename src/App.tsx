@@ -6,6 +6,7 @@ import VibeMap from "./pages/VibeMap";
 import Login from "./pages/Login";
 import Setup from "./pages/Setup";
 import Dashboard from "./pages/Dashboard";
+import CheckIn from "./pages/CheckIn";
 import PushBanner from "./components/PushBanner";
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
             <Route path="/dashboard" element={<Login />} />
             <Route path="/setup" element={<Setup />} />
             <Route path="/dashboard/manage" element={<Dashboard />} />
+            <Route path="/check-in/:code" element={<CheckIn />} />
           </Routes>
           <PushBanner />
         </div>

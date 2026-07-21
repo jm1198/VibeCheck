@@ -67,6 +67,7 @@ export interface AnalyticsResponse {
   repeat_viewer_rate: number;
   peak_day: string | null;
   peak_hour: number | null;
+  check_ins_this_week?: number;
 }
 
 export interface CrowdDensity {
@@ -75,4 +76,22 @@ export interface CrowdDensity {
   density_score: number;
   analyzed_at: string;
   label: string;
+}
+
+export interface CheckInCodeResponse {
+  check_in_code: string;
+  offer: string;
+}
+
+export interface CheckInResponse {
+  venue_name: string;
+  offer: string;
+  already_checked_in: boolean;
+}
+
+export interface CheckInStats {
+  code: string;
+  offer: string;
+  check_ins_this_week: number;
+  total_check_ins: number;
 }

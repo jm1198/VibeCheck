@@ -6,7 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocketServer, WebSocket } from "ws";
 import webpush from "web-push";
-import { getDb, generateStreamKey } from "./db.ts";
+import { getDb, generateStreamKey, generateCheckInCode } from "./db.ts";
 import type { VenueRow } from "./db.ts";
 import { getVapidKeys } from "./src/vapid.ts";
 import {
@@ -810,6 +810,11 @@ app.get("/api/venues/:id/analytics", (req, res) => {
     ? Math.round((repeatCount / uniqueViewers) * 100)
     : 0;
 
+  // Check-ins this week
+  const checkInsThisWeek = (db.prepare(
+    "SELECT COUNT(*) as c FROM check_ins WHERE venue_id = ? AND created_at >= datetime('now', '-7 days')"
+  ).get(venueId) as { c: number }).c;
+
   res.json({
     total_views: totalViews,
     unique_viewers: uniqueViewers,
@@ -819,6 +824,7 @@ app.get("/api/venues/:id/analytics", (req, res) => {
     repeat_viewer_rate: repeatViewerRate,
     peak_day: peakDay,
     peak_hour: peakHour,
+    check_ins_this_week: checkInsThisWeek,
   });
 });
 
@@ -1113,6 +1119,124 @@ async function sendLiveNotifications(venueId: number, venueName: string) {
 
   console.log(`Push notifications for venue "${venueName}": ${sent} sent, ${failed} failed`);
 }
+
+// ─── Check-Ins ──────────────────────────────────────────────────
+
+// GET check-in code (venue owner only)
+app.get("/api/venues/:id/check-in-code", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const venueId = parseInt(req.params.id);
+  if (session.venueId !== venueId) {
+    res.status(403).json({ error: "Forbidden — you can only access your own venue's check-in code" });
+    return;
+  }
+
+  const db = getDb();
+  const venue = db.prepare("SELECT check_in_code, name FROM venues WHERE id = ?").get(venueId) as
+    | { check_in_code: string | null; name: string }
+    | undefined;
+
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+
+  // Generate a code if none exists
+  let code = venue.check_in_code;
+  if (!code) {
+    code = generateCheckInCode();
+    db.prepare("UPDATE venues SET check_in_code = ? WHERE id = ?").run(code, venueId);
+  }
+
+  res.json({
+    check_in_code: code,
+    offer: "10% off your first drink",
+  });
+});
+
+// POST check-in (any authenticated user)
+app.post("/api/check-in/:code", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Sign in required to check in" });
+    return;
+  }
+
+  const code = req.params.code;
+  const db = getDb();
+
+  const venue = db.prepare("SELECT id, name FROM venues WHERE check_in_code = ?").get(code) as
+    | { id: number; name: string }
+    | undefined;
+
+  if (!venue) {
+    res.status(404).json({ error: "Invalid check-in code. This venue may not exist." });
+    return;
+  }
+
+  // Check if user already checked in today
+  const today = new Date().toISOString().slice(0, 10);
+  const existing = db.prepare(
+    "SELECT id FROM check_ins WHERE venue_id = ? AND user_id = ? AND date(created_at) = ?"
+  ).get(venue.id, session.userId, today) as { id: number } | undefined;
+
+  const alreadyCheckedIn = !!existing;
+
+  if (!alreadyCheckedIn) {
+    db.prepare(
+      "INSERT INTO check_ins (venue_id, user_id, code) VALUES (?, ?, ?)"
+    ).run(venue.id, session.userId, code);
+  }
+
+  res.json({
+    venue_name: venue.name,
+    offer: "10% off your first drink",
+    already_checked_in: alreadyCheckedIn,
+  });
+});
+
+// GET check-in stats (venue owner only)
+app.get("/api/venues/:id/check-ins", (req, res) => {
+  const session = getSessionUser(req);
+  if (!session) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const venueId = parseInt(req.params.id);
+  if (session.venueId !== venueId) {
+    res.status(403).json({ error: "Forbidden — you can only access your own venue's check-in stats" });
+    return;
+  }
+
+  const db = getDb();
+  const venue = db.prepare("SELECT check_in_code FROM venues WHERE id = ?").get(venueId) as
+    | { check_in_code: string | null }
+    | undefined;
+
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+
+  const checkInsThisWeek = (db.prepare(
+    "SELECT COUNT(*) as c FROM check_ins WHERE venue_id = ? AND created_at >= datetime('now', '-7 days')"
+  ).get(venueId) as { c: number }).c;
+
+  const totalCheckIns = (db.prepare(
+    "SELECT COUNT(*) as c FROM check_ins WHERE venue_id = ?"
+  ).get(venueId) as { c: number }).c;
+
+  res.json({
+    code: venue.check_in_code || "",
+    offer: "10% off your first drink",
+    check_ins_this_week: checkInsThisWeek,
+    total_check_ins: totalCheckIns,
+  });
+});
 
 // ─── Static files & SPA fallback ───────────────────────────────
 

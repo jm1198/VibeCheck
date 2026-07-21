@@ -141,6 +141,9 @@ function initSchema() {
   if (!venueCols.some((c) => c.name === "promo_text")) {
     d.run("ALTER TABLE venues ADD COLUMN promo_text TEXT");
   }
+  if (!venueCols.some((c) => c.name === "check_in_code")) {
+    d.run("ALTER TABLE venues ADD COLUMN check_in_code TEXT");
+  }
 
   // ── Favorites table ──────────────────────────────────────────
   d.run(`
@@ -167,6 +170,19 @@ function initSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+
+  // ── Check-ins table ──────────────────────────────────────────
+  d.run(`
+    CREATE TABLE IF NOT EXISTS check_ins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      venue_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      code TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (venue_id) REFERENCES venues(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
 }
 
 function seedIfEmpty() {
@@ -176,8 +192,8 @@ function seedIfEmpty() {
   if (row.c > 0) return;
 
   const insert = db.prepare(`
-    INSERT INTO venues (name, location, description, category, thumbnail_url, is_live, viewer_count, owner_email, latitude, longitude)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO venues (name, location, description, category, thumbnail_url, is_live, viewer_count, owner_email, latitude, longitude, check_in_code)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const venues = [
@@ -260,7 +276,8 @@ function seedIfEmpty() {
         v.viewers,
         v.email,
         v.lat,
-        v.lng
+        v.lng,
+        generateCheckInCode()
       );
     }
   });
@@ -282,6 +299,15 @@ export function generateStreamKey(): string {
   return `vibe_${crypto.randomBytes(16).toString("hex")}`;
 }
 
+export function generateCheckInCode(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "";
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 export interface VenueRow {
   id: number;
   name: string;
@@ -299,6 +325,7 @@ export interface VenueRow {
   crowd_density: number | null;
   density_updated_at: string | null;
   promo_text: string | null;
+  check_in_code: string | null;
   created_at: string;
   updated_at: string;
 }

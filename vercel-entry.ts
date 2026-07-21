@@ -29,6 +29,7 @@ const venues = [
     latitude: 32.7115,
     longitude: -117.1587,
     promo_text: null,
+    check_in_code: "BASSLINE",
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -46,6 +47,7 @@ const venues = [
     latitude: 32.7120,
     longitude: -117.1595,
     promo_text: null,
+    check_in_code: "NEONDRGN",
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -63,6 +65,7 @@ const venues = [
     latitude: 32.7457,
     longitude: -117.1295,
     promo_text: null,
+    check_in_code: "VELVETRM",
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -80,6 +83,7 @@ const venues = [
     latitude: 32.7952,
     longitude: -117.2547,
     promo_text: null,
+    check_in_code: "HIDEAWAY",
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -97,6 +101,7 @@ const venues = [
     latitude: 32.7110,
     longitude: -117.1575,
     promo_text: null,
+    check_in_code: "SKYBAR5",
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
   },
@@ -176,6 +181,24 @@ interface PushSub {
   created_at: string;
 }
 const pushSubscriptions: PushSub[] = [];
+
+// ── Check-in records (in-memory for serverless) ──
+interface CheckInRecord {
+  venue_id: number;
+  user_id: number;
+  code: string;
+  created_at: string;
+}
+const checkInRecords: CheckInRecord[] = [];
+
+function generateCheckInCodeForServerless(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "";
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
 
 // ── VAPID keys (in-memory, regenerated per cold start) ──
 let vapidKeys: { publicKey: string; privateKey: string } | null = null;
@@ -495,10 +518,15 @@ export default async function handler(req: any, res: any) {
         for (const c of userViewCounts.values()) if (c > 1) repeatCount++;
         const repeatViewerRate = uniqueViewers > 0 ? Math.round((repeatCount / uniqueViewers) * 100) : 0;
 
+        const checkInsThisWeekAnalytics = checkInRecords.filter(
+          (r) => r.venue_id === venueId && r.created_at >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+        ).length;
+
         return json(res, 200, {
           total_views: totalViews, unique_viewers: uniqueViewers, views_by_day: viewsByDay,
           views_by_hour: viewsByHour, avg_view_duration: avgViewDuration,
           repeat_viewer_rate: repeatViewerRate, peak_day: peakDay, peak_hour: peakHour,
+          check_ins_this_week: checkInsThisWeekAnalytics,
         });
       }
 
@@ -688,6 +716,77 @@ export default async function handler(req: any, res: any) {
         );
         if (idx >= 0) pushSubscriptions.splice(idx, 1);
         return json(res, 200, { success: true });
+      }
+
+      // ── Check-Ins ──
+
+      // GET /api/venues/:id/check-in-code
+      const checkInCodeMatch = pathname.match(/^\/api\/venues\/(\d+)\/check-in-code$/);
+      if (checkInCodeMatch && req.method === "GET") {
+        const session = getSessionUser(req);
+        if (!session) return json(res, 401, { error: "Unauthorized" });
+        const venueId = parseInt(checkInCodeMatch[1]);
+        if (session.venueId !== venueId) return json(res, 403, { error: "Forbidden" });
+        const v = venues.find((v) => v.id === venueId);
+        if (!v) return json(res, 404, { error: "Venue not found" });
+        // Generate code if missing
+        if (!(v as any).check_in_code) {
+          (v as any).check_in_code = generateCheckInCodeForServerless();
+        }
+        return json(res, 200, {
+          check_in_code: (v as any).check_in_code,
+          offer: "10% off your first drink",
+        });
+      }
+
+      // POST /api/check-in/:code
+      const checkInMatch = pathname.match(/^\/api\/check-in\/(.+)$/);
+      if (checkInMatch && req.method === "POST") {
+        const session = getSessionUser(req);
+        if (!session) return json(res, 401, { error: "Sign in required to check in" });
+        const code = checkInMatch[1];
+        const v = venues.find((v) => (v as any).check_in_code === code);
+        if (!v) return json(res, 404, { error: "Invalid check-in code. This venue may not exist." });
+        // Check if already checked in today — in serverless, just return success
+        const today = new Date().toISOString().slice(0, 10);
+        const alreadyCheckedIn = checkInRecords.some(
+          (r) => r.venue_id === v.id && r.user_id === session.userId && r.created_at.startsWith(today)
+        );
+        if (!alreadyCheckedIn) {
+          checkInRecords.push({
+            venue_id: v.id,
+            user_id: session.userId,
+            code,
+            created_at: new Date().toISOString(),
+          });
+        }
+        return json(res, 200, {
+          venue_name: v.name,
+          offer: "10% off your first drink",
+          already_checked_in: alreadyCheckedIn,
+        });
+      }
+
+      // GET /api/venues/:id/check-ins
+      const checkInsMatch = pathname.match(/^\/api\/venues\/(\d+)\/check-ins$/);
+      if (checkInsMatch && req.method === "GET") {
+        const session = getSessionUser(req);
+        if (!session) return json(res, 401, { error: "Unauthorized" });
+        const venueId = parseInt(checkInsMatch[1]);
+        if (session.venueId !== venueId) return json(res, 403, { error: "Forbidden" });
+        const v = venues.find((v) => v.id === venueId);
+        if (!v) return json(res, 404, { error: "Venue not found" });
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const checkInsThisWeek = checkInRecords.filter(
+          (r) => r.venue_id === venueId && r.created_at >= weekAgo
+        ).length;
+        const totalCheckIns = checkInRecords.filter((r) => r.venue_id === venueId).length;
+        return json(res, 200, {
+          code: (v as any).check_in_code || "",
+          offer: "10% off your first drink",
+          check_ins_this_week: checkInsThisWeek,
+          total_check_ins: totalCheckIns,
+        });
       }
 
       // Fallback for unknown API routes
