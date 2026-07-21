@@ -597,10 +597,24 @@ export default async function handler(req: any, res: any) {
           const v = venues.find((v) => v.id === vid);
           if (!v) return json(res, 404, { error: "Venue not found" });
 
-          // Parse body so req.body is populated for getClientIdServerless
-          await readBody(req);
+          // Parse body so we can extract anonymous_id
+          const body = await readBody(req);
+          const bodyId = body?.anonymous_id;
 
-          const clientId = getClientIdServerless(req);
+          // Get client ID: prefer body param, then query param, then IP
+          let clientId: string;
+          if (bodyId && typeof bodyId === "string" && bodyId.length > 0) {
+            clientId = bodyId;
+          } else {
+            const reqUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+            const queryId = reqUrl.searchParams.get("anonymous_id");
+            if (queryId) {
+              clientId = queryId;
+            } else {
+              const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
+              clientId = `ip:${ip}`;
+            }
+          }
           const now = new Date();
           const session = viewerSessions
             .filter((s) => s.anonymousId === clientId && s.venueId === vid)
