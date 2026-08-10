@@ -137,9 +137,11 @@ export default function VenueGrid() {
       <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-vibe-border">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-vibe-accent flex items-center justify-center shadow-md">
-              <span className="text-white font-extrabold text-lg">V</span>
-            </div>
+            <img
+              src="/icon-192.png"
+              alt="VibeCheck logo"
+              className="w-9 h-9 rounded-xl shadow-md"
+            />
             <span className="text-vibe-text font-bold text-lg tracking-tight hidden sm:block" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
               VibeCheck
             </span>
@@ -431,7 +433,12 @@ export default function VenueGrid() {
       {/* ═══ FOOTER ═══ */}
       <footer className="border-t border-vibe-border py-10">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 text-center text-vibe-muted text-sm">
-          <p className="mb-2">
+          <p className="mb-2 flex items-center justify-center gap-2">
+            <img
+              src="/icon-192.png"
+              alt="VibeCheck logo"
+              className="w-5 h-5 rounded-md"
+            />
             <span className="font-bold text-vibe-text">VibeCheck</span> — Real-time venue vibes.
           </p>
           <p>
