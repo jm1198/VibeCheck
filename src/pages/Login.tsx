@@ -183,8 +183,12 @@ export default function Login() {
       <div className="w-full max-w-sm animate-fade-up">
         {/* Logo / Brand */}
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-vibe-accent shadow-md mb-6">
-            <span className="text-white font-extrabold text-3xl">V</span>
+          <div className="inline-flex items-center justify-center mb-6">
+            <img
+              src="/icon-192.png"
+              alt="VibeCheck logo"
+              className="w-16 h-16 rounded-2xl shadow-md"
+            />
           </div>
           <h1 className="text-5xl sm:text-6xl font-bold tracking-tight leading-none" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
             <span className="gradient-text">VibeCheck</span>

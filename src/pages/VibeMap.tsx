@@ -96,9 +96,11 @@ export default function VibeMap() {
       <nav className="z-50 bg-white/90 backdrop-blur-xl border-b border-vibe-border shrink-0">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-vibe-accent flex items-center justify-center shadow-md">
-              <span className="text-white font-extrabold text-lg">V</span>
-            </div>
+            <img
+              src="/icon-192.png"
+              alt="VibeCheck logo"
+              className="w-9 h-9 rounded-xl shadow-md"
+            />
             <span
               className="text-vibe-text font-bold text-lg tracking-tight hidden sm:block"
               style={{ fontFamily: "'Playfair Display', Georgia, serif" }}

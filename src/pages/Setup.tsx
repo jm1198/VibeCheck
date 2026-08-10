@@ -84,8 +84,12 @@ export default function Setup() {
       <div className="w-full max-w-md animate-fade-up">
         {/* Logo / Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-vibe-accent shadow-md mb-5">
-            <span className="text-white font-extrabold text-2xl">V</span>
+          <div className="inline-flex items-center justify-center mb-5">
+            <img
+              src="/icon-192.png"
+              alt="VibeCheck logo"
+              className="w-14 h-14 rounded-2xl shadow-md"
+            />
           </div>
           <h1 className="text-3xl font-bold gradient-text">Create Your Venue</h1>
           <p className="text-vibe-muted mt-2 text-sm">
