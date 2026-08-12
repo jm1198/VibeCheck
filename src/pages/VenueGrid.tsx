@@ -442,6 +442,28 @@ export default function VenueGrid() {
             />
             <span className="font-bold text-vibe-text">VibeCheck</span> — Real-time venue vibes.
           </p>
+          <a
+            href="https://www.instagram.com/vibecheck.sd/"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="VibeCheck on Instagram"
+            className="inline-flex items-center justify-center w-10 h-10 rounded-full border border-vibe-border text-vibe-muted hover:text-white hover:bg-vibe-accent hover:border-vibe-accent transition-colors mt-3"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+            </svg>
+          </a>
           <p>
             For venue owners:{" "}
             <Link to="/dashboard" className="text-vibe-accent hover:underline font-semibold">
