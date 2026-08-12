@@ -21,20 +21,17 @@ L.Icon.Default.mergeOptions({
 });
 
 function createCircleMarker(color: string, isLive: boolean) {
-  const size = isLive ? 16 : 12;
+  const dotSize = isLive ? 18 : 13;
+  const boxSize = isLive ? 44 : 28;
+  const pulse = isLive
+    ? `<span class="vibe-marker-pulse" style="width:${dotSize}px;height:${dotSize}px"></span>`
+    : "";
   return L.divIcon({
     className: "custom-marker",
-    html: `<div style="
-      width: ${size}px;
-      height: ${size}px;
-      background: ${color};
-      border: 3px solid white;
-      border-radius: 50%;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    "></div>`,
-    iconSize: [size + 6, size + 6],
-    iconAnchor: [(size + 6) / 2, (size + 6) / 2],
-    popupAnchor: [0, -((size + 6) / 2)],
+    html: `<div class="vibe-marker" style="--marker-color:${color}">${pulse}<span class="vibe-marker-dot" style="width:${dotSize}px;height:${dotSize}px"></span></div>`,
+    iconSize: [boxSize, boxSize],
+    iconAnchor: [boxSize / 2, boxSize / 2],
+    popupAnchor: [0, -(boxSize / 2)],
   });
 }
 
@@ -329,17 +326,19 @@ export default function VenueGrid() {
           </div>
         ) : viewMode === "map" ? (
           /* ── Inline Map View ── */
-          <div className="rounded-2xl overflow-hidden border-2 border-vibe-border-dark shadow-card" style={{ height: "500px" }}>
+          <div className="vibe-map-shell rounded-2xl overflow-hidden border border-vibe-border shadow-card-hover" style={{ height: "500px" }}>
             <MapContainer
               center={[32.7157, -117.1611]}
               zoom={13}
               className="h-full w-full"
               zoomControl={true}
               attributionControl={true}
+              zoomAnimation={true}
             >
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                subdomains="abcd"
               />
               {filtered
                 .filter((v) => v.latitude != null && v.longitude != null)
@@ -403,6 +402,8 @@ export default function VenueGrid() {
                   );
                 })}
             </MapContainer>
+            {/* subtle edge vignette for depth */}
+            <div className="vibe-map-vignette" aria-hidden />
           </div>
         ) : (
           /* ── Grid View ── */

@@ -18,23 +18,19 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-// ── Custom colored circle markers ────────────────────────────────
+// ── Custom polished dot markers ────────────────────────────────
 function createCircleMarker(color: string, isLive: boolean) {
-  const size = isLive ? 16 : 12;
-  const pulseClass = isLive ? "live-marker-pulse" : "";
+  const dotSize = isLive ? 18 : 13;
+  const boxSize = isLive ? 44 : 28;
+  const pulse = isLive
+    ? `<span class="vibe-marker-pulse" style="width:${dotSize}px;height:${dotSize}px"></span>`
+    : "";
   return L.divIcon({
-    className: `custom-marker ${pulseClass}`,
-    html: `<div style="
-      width: ${size}px;
-      height: ${size}px;
-      background: ${color};
-      border: 3px solid white;
-      border-radius: 50%;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    "></div>`,
-    iconSize: [size + 6, size + 6],
-    iconAnchor: [(size + 6) / 2, (size + 6) / 2],
-    popupAnchor: [0, -((size + 6) / 2)],
+    className: "custom-marker",
+    html: `<div class="vibe-marker" style="--marker-color:${color}">${pulse}<span class="vibe-marker-dot" style="width:${dotSize}px;height:${dotSize}px"></span></div>`,
+    iconSize: [boxSize, boxSize],
+    iconAnchor: [boxSize / 2, boxSize / 2],
+    popupAnchor: [0, -(boxSize / 2)],
   });
 }
 
@@ -132,26 +128,28 @@ export default function VibeMap() {
       </nav>
 
       {/* ═══ MAP AREA ═══ */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative p-3 sm:p-5">
         {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-vibe-surface">
+          <div className="absolute inset-0 m-3 sm:m-5 flex items-center justify-center bg-vibe-surface rounded-2xl border border-vibe-border">
             <div className="text-center">
               <div className="shimmer rounded-2xl w-64 h-64 mx-auto" />
               <p className="text-vibe-muted mt-4 text-sm">Loading map…</p>
             </div>
           </div>
         ) : (
-          <>
+          <div className="vibe-map-shell h-full w-full rounded-2xl overflow-hidden border border-vibe-border shadow-card">
             <MapContainer
               center={sdCenter}
               zoom={13}
               className="h-full w-full"
               zoomControl={true}
               attributionControl={true}
+              zoomAnimation={true}
             >
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                subdomains="abcd"
               />
               <AutoCenter venues={venues} />
 
@@ -226,20 +224,23 @@ export default function VibeMap() {
                 })}
             </MapContainer>
 
+            {/* subtle edge vignette for depth */}
+            <div className="vibe-map-vignette" aria-hidden />
+
             {/* ═══ LEGEND ═══ */}
-            <div className="absolute bottom-4 left-4 z-[1000] bg-white/90 backdrop-blur-md rounded-2xl px-4 py-3 shadow-lg border border-vibe-border text-xs">
+            <div className="absolute bottom-4 left-4 z-[1000] bg-black/60 backdrop-blur-md rounded-2xl px-4 py-3 shadow-lg border border-white/10 text-xs">
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-[#22c55e] border-2 border-white shadow-sm" />
-                  <span className="text-vibe-text font-medium">Live</span>
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#22c55e] border-2 border-white shadow-[0_1px_4px_rgba(0,0,0,0.5)]" />
+                  <span className="text-white font-medium">Live</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-full bg-[#9ca3af] border-2 border-white shadow-sm" />
-                  <span className="text-vibe-muted">Offline</span>
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#9ca3af] border-2 border-white shadow-[0_1px_4px_rgba(0,0,0,0.5)]" />
+                  <span className="text-white/60">Offline</span>
                 </div>
               </div>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
