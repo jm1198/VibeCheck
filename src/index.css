@@ -41,10 +41,16 @@
 }
 
 /* ── Base ── */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* The reset must live inside @layer base: unlayered CSS wins over layered
+   CSS, so an unlayered `* { margin: 0; padding: 0 }` would silently kill
+   every Tailwind margin/padding utility (mx-auto, mt-*, px-*, …) and break
+   centering site-wide. */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 }
 
 html, body, #root {
