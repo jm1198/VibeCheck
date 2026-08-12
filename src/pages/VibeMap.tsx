@@ -148,7 +148,7 @@ export default function VibeMap() {
             >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
                 subdomains="abcd"
               />
               <AutoCenter venues={venues} />
@@ -228,15 +228,15 @@ export default function VibeMap() {
             <div className="vibe-map-vignette" aria-hidden />
 
             {/* ═══ LEGEND ═══ */}
-            <div className="absolute bottom-4 left-4 z-[1000] bg-black/60 backdrop-blur-md rounded-2xl px-4 py-3 shadow-lg border border-white/10 text-xs">
+            <div className="absolute bottom-4 left-4 z-[1000] bg-white/85 backdrop-blur-md rounded-2xl px-4 py-3 shadow-lg border border-black/5 text-xs">
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3.5 h-3.5 rounded-full bg-[#22c55e] border-2 border-white shadow-[0_1px_4px_rgba(0,0,0,0.5)]" />
-                  <span className="text-white font-medium">Live</span>
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#22c55e] border-2 border-white shadow-[0_1px_4px_rgba(0,0,0,0.35)]" />
+                  <span className="text-gray-900 font-medium">Live</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-3.5 h-3.5 rounded-full bg-[#9ca3af] border-2 border-white shadow-[0_1px_4px_rgba(0,0,0,0.5)]" />
-                  <span className="text-white/60">Offline</span>
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#9ca3af] border-2 border-white shadow-[0_1px_4px_rgba(0,0,0,0.35)]" />
+                  <span className="text-gray-500">Offline</span>
                 </div>
               </div>
             </div>
