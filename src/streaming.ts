@@ -154,13 +154,14 @@ export function getStreamKey(venueId: number): string | null {
 }
 
 /**
- * Get the full RTMP ingest URL for a venue.
+ * Get the full Mux ingest URL for a venue (RTMPS, per the ratified
+ * streaming architecture — see relay/README.md).
  * Returns null if the venue has no stream key.
  */
 export function getRtmpUrl(venueId: number): string | null {
   const key = getStreamKey(venueId);
   if (!key) return null;
-  return `rtmp://live.mux.com/app/${key}`;
+  return `rtmps://global-live.mux.com:443/app/${key}`;
 }
 
 /**

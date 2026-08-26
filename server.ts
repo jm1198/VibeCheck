@@ -480,11 +480,11 @@ app.get("/api/venues/:id/stream-key", async (req, res) => {
       const stream = await getOrCreateLiveStream(venueId);
       res.json({
         stream_key: stream.streamKey,
-        rtmp_url: `rtmp://live.mux.com/app/${stream.streamKey}`,
+        rtmp_url: `rtmps://global-live.mux.com:443/app/${stream.streamKey}`,
         stream_url: stream.playbackUrl,
         instructions: {
-          obs: `1. Open OBS Studio\n2. Go to Settings → Stream\n3. Service: Custom\n4. Server: rtmp://live.mux.com/app\n5. Stream Key: ${stream.streamKey}\n6. Click Start Streaming`,
-          ip_camera: `Set your IP camera's RTMP publish URL to: rtmp://live.mux.com/app/${stream.streamKey}`,
+          obs: `1. Open OBS Studio\n2. Go to Settings → Stream\n3. Service: Custom\n4. Server: rtmps://global-live.mux.com:443/app\n5. Stream Key: ${stream.streamKey}\n6. Click Start Streaming`,
+          ip_camera: `Production path: the VibeCheck relay box does this automatically (camera RTSP → relay → Mux). See relay/README.md. Manual ingest URL: rtmps://global-live.mux.com:443/app/${stream.streamKey}`,
         },
       });
       return;
@@ -497,7 +497,7 @@ app.get("/api/venues/:id/stream-key", async (req, res) => {
     }
   }
 
-  // Fallback: local stream key (WebSocket demo mode)
+  // Fallback: local stream key (WebSocket demo mode — no Mux configured)
   let key = venue.stream_key;
   if (!key) {
     key = generateStreamKey();
@@ -506,11 +506,11 @@ app.get("/api/venues/:id/stream-key", async (req, res) => {
 
   res.json({
     stream_key: key,
-    rtmp_url: `rtmp://vibecheck.live/live`,
+    rtmp_url: "",
     stream_url: `/api/venues/${venueId}/stream`,
     instructions: {
-      obs: `1. Open OBS Studio\n2. Go to Settings → Stream\n3. Service: Custom\n4. Server: rtmp://vibecheck.live/live\n5. Stream Key: ${key}\n6. Click Start Streaming`,
-      ip_camera: `Set your IP camera's RTMP publish URL to: rtmp://vibecheck.live/live/${key}`,
+      obs: `Demo mode (WebSocket relay): Mux is not configured (set MUX_TOKEN_ID/MUX_TOKEN_SECRET to enable production streaming). Use the "Test Camera" browser broadcast below for a quick demo.`,
+      ip_camera: `Production path: the VibeCheck relay box pushes the camera to Mux (camera RTSP → relay → Mux). See relay/README.md. No self-hosted RTMP server is used.`,
     },
   });
 });
@@ -543,8 +543,8 @@ app.post("/api/venues/:id/stream-key", async (req, res) => {
       const stream = await createLiveStream(venueId);
       res.json({
         stream_key: stream.streamKey,
-        rtmp_url: `rtmp://live.mux.com/app/${stream.streamKey}`,
-        message: "Stream key regenerated successfully. Update your encoder with the new key.",
+        rtmp_url: `rtmps://global-live.mux.com:443/app/${stream.streamKey}`,
+        message: "Stream key regenerated successfully. Update the relay's relay.conf (MUX_STREAM_KEY) with the new key.",
       });
       return;
     } catch (err) {
@@ -562,8 +562,8 @@ app.post("/api/venues/:id/stream-key", async (req, res) => {
 
   res.json({
     stream_key: newKey,
-    rtmp_url: `rtmp://vibecheck.live/live`,
-    message: "Stream key regenerated successfully. Update your encoder with the new key.",
+    rtmp_url: "",
+    message: "Demo-mode stream key regenerated. Production streaming requires Mux (set MUX_TOKEN_ID/MUX_TOKEN_SECRET); see relay/README.md.",
   });
 });
 
