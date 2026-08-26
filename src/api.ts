@@ -53,11 +53,12 @@ export function login(
 export function signup(
   email: string,
   password: string,
-  role: "consumer" | "venue_owner" = "consumer"
+  role: "consumer" | "venue_owner" = "consumer",
+  privacyAccepted?: boolean
 ): Promise<{ success: boolean; role: string }> {
   return request("/auth/signup", {
     method: "POST",
-    body: JSON.stringify({ email, password, role }),
+    body: JSON.stringify({ email, password, role, privacyAccepted }),
   });
 }
 

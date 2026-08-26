@@ -36,6 +36,7 @@ export default function Login() {
   const [accountType, setAccountType] = useState<"consumer" | "venue_owner">("consumer");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
 
   // Redirect after login — check for ?redirect= param
   const redirectTo = searchParams.get("redirect") || null;
@@ -148,8 +149,12 @@ export default function Login() {
           navigate("/", { replace: true });
         }
       } else {
+        if (!agreedToPrivacy) {
+          setError("Please read and agree to the Privacy Policy to continue.");
+          return;
+        }
         const role = accountType;
-        await signup(email, password, role);
+        await signup(email, password, role, agreedToPrivacy);
         // Auto-login after signup
         const loginResult = await login(email, password);
         localStorage.setItem("vibecheck_token", loginResult.token);
@@ -289,6 +294,30 @@ export default function Login() {
               placeholder={isDashboardPath ? "demo123" : "••••••••"}
             />
           </div>
+
+          {mode === "signup" && (
+            <label className="flex items-start gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={agreedToPrivacy}
+                onChange={(e) => setAgreedToPrivacy(e.target.checked)}
+                className="mt-0.5 w-4 h-4 rounded accent-vibe-accent cursor-pointer shrink-0"
+                required
+              />
+              <span className="text-xs text-vibe-muted leading-relaxed">
+                I have read and agree to the{" "}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-vibe-accent hover:underline font-semibold"
+                >
+                  Privacy Policy
+                </a>
+                . Your data is stored privately and live venue feeds have no audio or recordings.
+              </span>
+            </label>
+          )}
 
           <button
             type="submit"

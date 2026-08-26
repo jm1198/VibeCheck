@@ -134,9 +134,13 @@ app.get("/api/venues/:id", (req, res) => {
 
 // Auth: signup
 app.post("/api/auth/signup", (req, res) => {
-  const { email, password, role } = req.body;
+  const { email, password, role, privacyAccepted } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Email and password required" });
+    return;
+  }
+  if (privacyAccepted !== true) {
+    res.status(400).json({ error: "You must accept the Privacy Policy to create an account" });
     return;
   }
   const db = getDb();
@@ -147,7 +151,7 @@ app.post("/api/auth/signup", (req, res) => {
   }
   const hash = hashPassword(password);
   const userRole = role === "venue_owner" ? "venue_owner" : "consumer";
-  db.prepare("INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)").run(email, hash, userRole);
+  db.prepare("INSERT INTO users (email, password_hash, role, privacy_accepted_at) VALUES (?, ?, ?, datetime('now'))").run(email, hash, userRole);
   res.json({ success: true, role: userRole });
 });
 
