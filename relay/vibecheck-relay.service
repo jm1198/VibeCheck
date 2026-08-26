@@ -1,0 +1,43 @@
+# VibeCheck relay systemd unit
+#
+# Runs the relay runner (/usr/local/bin/vibecheck-relay-run.sh), which execs
+# ffmpeg: Camera RTSP (LAN) → Mux RTMPS ingest → HLS in the VibeCheck app.
+#
+# Install: relay/provision.sh copies this to /etc/systemd/system/
+# Logs:    journalctl -u vibecheck-relay -f
+#
+# Reconnect behavior: the relay must self-heal unattended. ffmpeg exits when
+# the stream drops (camera off, WiFi blip, Mux hiccup), so Restart=always
+# brings it back after RestartSec=5. StartLimitIntervalSec=0 (in [Unit])
+# disables systemd's crash-loop rate limiter deliberately: an unreachable
+# camera (e.g. the owner powered it off for the night) must NOT flip the unit
+# into "failed" state — it should keep retrying forever and come back the
+# moment the camera returns.
+
+[Unit]
+Description=VibeCheck relay — push venue camera RTSP to Mux
+Documentation=https://github.com/jm1198/VibeCheck/tree/main/relay
+Wants=network-online.target
+After=network-online.target
+# Never trip the start-rate limiter (see note above): an unreachable camera
+# must not flip the unit into "failed" — retry forever instead.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/vibecheck-relay-run.sh
+EnvironmentFile=/etc/vibecheck-relay/relay.conf
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=15
+# Sanity hardenings — the relay only reads config and writes to the network.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target
