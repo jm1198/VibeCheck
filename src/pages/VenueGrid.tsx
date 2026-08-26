@@ -470,6 +470,11 @@ export default function VenueGrid() {
               manage your listing
             </Link>
           </p>
+          <p className="mt-3">
+            <Link to="/privacy" className="text-vibe-muted hover:text-vibe-text hover:underline font-medium">
+              Privacy Policy
+            </Link>
+          </p>
         </div>
       </footer>
     </div>

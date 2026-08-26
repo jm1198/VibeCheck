@@ -60,6 +60,7 @@ function initSchema() {
       venue_id INTEGER,
       role TEXT NOT NULL DEFAULT 'consumer',
       google_id TEXT,
+      privacy_accepted_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (venue_id) REFERENCES venues(id)
     )
@@ -72,6 +73,9 @@ function initSchema() {
   }
   if (!userCols.some((c) => c.name === "google_id")) {
     d.run("ALTER TABLE users ADD COLUMN google_id TEXT");
+  }
+  if (!userCols.some((c) => c.name === "privacy_accepted_at")) {
+    d.run("ALTER TABLE users ADD COLUMN privacy_accepted_at TEXT");
   }
 
   // Migration: set role='venue_owner' for existing users who have a venue
