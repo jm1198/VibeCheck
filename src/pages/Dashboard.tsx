@@ -104,7 +104,9 @@ export default function Dashboard() {
 
   // Fetch analytics when tab changes or period changes
   useEffect(() => {
-    if (activeTab === "analytics" && venue) {
+    // Analytics is a Premium-only feature. Don't even request it for base
+    // venues — the server enforces this anyway, but we avoid the call.
+    if (activeTab === "analytics" && venue && venue.plan === "premium") {
       setAnalyticsLoading(true);
       getAnalytics(venue.id, analyticsPeriod)
         .then((a) => setAnalytics(a))
@@ -445,7 +447,18 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-vibe-text tracking-tight">{venue.name}</h1>
+            <h1 className="text-3xl font-bold text-vibe-text tracking-tight">
+              {venue.name}
+              {venue.plan === "premium" ? (
+                <span className="ml-3 align-middle inline-flex items-center gap-1.5 text-xs font-bold bg-vibe-accent text-white rounded-full px-3 py-1 shadow-sm">
+                  ⭐ PREMIUM
+                </span>
+              ) : (
+                <span className="ml-3 align-middle inline-flex items-center gap-1.5 text-xs font-semibold bg-vibe-surface text-vibe-muted border border-vibe-border rounded-full px-3 py-1">
+                  BASE
+                </span>
+              )}
+            </h1>
             <p className="text-vibe-muted text-sm mt-0.5">Venue Dashboard</p>
           </div>
           <div className="flex gap-3 items-center">
@@ -500,7 +513,7 @@ export default function Dashboard() {
                 : "border-transparent text-vibe-muted hover:text-vibe-text"
             }`}
           >
-            📊 Analytics
+            {venue.plan === "premium" ? "📊 Analytics" : "📊 Analytics 🔒"}
           </button>
           <button
             onClick={() => setActiveTab("checkins")}
@@ -917,7 +930,7 @@ export default function Dashboard() {
         )}
 
         {/* ═══ Tab Content: Analytics ═══ */}
-        {activeTab === "analytics" && (
+        {activeTab === "analytics" && (venue.plan === "premium" ? (
           <div className="animate-fade-up">
             {/* Period Selector */}
             <div className="flex items-center justify-between mb-6">
@@ -1031,7 +1044,34 @@ export default function Dashboard() {
               </>
             ) : null}
           </div>
-        )}
+        ) : (
+          /* ── Premium-locked state for base venues ── */
+          <div className="animate-fade-up">
+            <div className="mb-6">
+              <h2 className="text-xl font-bold text-vibe-text">Analytics</h2>
+              <p className="text-vibe-muted text-sm">Track your venue's viewership</p>
+            </div>
+
+            <div className="bg-vibe-card border border-vibe-border rounded-2xl p-10 shadow-card text-center">
+              <div className="mx-auto w-16 h-16 rounded-2xl bg-vibe-accent/10 flex items-center justify-center mb-5">
+                <svg className="w-8 h-8 text-vibe-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-vibe-text mb-2">Analytics is a Premium feature</h3>
+              <p className="text-vibe-muted text-sm max-w-md mx-auto leading-relaxed mb-6">
+                Unlock detailed viewership insights — traffic, peak hours, and which nights drive the most interest — with the VibeCheck Premium plan.
+              </p>
+              <div className="inline-flex items-center gap-2 bg-vibe-surface border border-vibe-border rounded-full px-4 py-2 text-sm text-vibe-muted">
+                <span className="text-vibe-accent font-semibold">⭐ Premium</span>
+                <span className="text-vibe-muted-dim">· Featured placement, analytics &amp; more</span>
+              </div>
+              <p className="text-vibe-muted-dim text-xs mt-6">
+                Contact VibeCheck to upgrade this venue to Premium.
+              </p>
+            </div>
+          </div>
+        ))}
 
         {/* ═══ Tab Content: Check-Ins ═══ */}
         {activeTab === "checkins" && (

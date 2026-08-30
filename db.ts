@@ -35,6 +35,7 @@ function initSchema() {
       stream_key TEXT,
       latitude REAL,
       longitude REAL,
+      plan TEXT NOT NULL DEFAULT 'base',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -50,6 +51,9 @@ function initSchema() {
   }
   if (!cols.some((c) => c.name === "longitude")) {
     d.run("ALTER TABLE venues ADD COLUMN longitude REAL");
+  }
+  if (!cols.some((c) => c.name === "plan")) {
+    d.run("ALTER TABLE venues ADD COLUMN plan TEXT NOT NULL DEFAULT 'base'");
   }
 
   d.run(`
@@ -330,6 +334,7 @@ export interface VenueRow {
   density_updated_at: string | null;
   promo_text: string | null;
   check_in_code: string | null;
+  plan: string;
   created_at: string;
   updated_at: string;
 }

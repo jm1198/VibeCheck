@@ -6,6 +6,7 @@
     "dev": "bun run server.ts --dev",
     "build": "vite build",
     "start": "bun run server.ts",
+    "set-premium": "bun run scripts/set-premium.ts",
     "publish": "bash ./publish.sh",
     "go-live": "bash ./go-live.sh"
   },
