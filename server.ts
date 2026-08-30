@@ -94,6 +94,30 @@ function getSessionUser(req: express.Request): { userId: number; venueId: number
   return { userId: session.user_id, venueId: session.venue_id, role: session.role };
 }
 
+// ─── Admin helpers ─────────────────────────────────────────────
+// Admin is a manual designation for the owner (you). Configure the owner's
+// account email(s) via the ADMIN_EMAILS env var (comma-separated). If unset,
+// the admin endpoints are disabled for safety — the CLI (`bun run set-premium`)
+// is always available regardless of this.
+function getAdminEmails(): string[] {
+  return (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isAdmin(req: express.Request): boolean {
+  const emails = getAdminEmails();
+  if (emails.length === 0) return false;
+  const session = getSessionUser(req);
+  if (!session) return false;
+  const db = getDb();
+  const user = db.prepare("SELECT email FROM users WHERE id = ?").get(session.userId) as
+    | { email: string }
+    | undefined;
+  return !!user && emails.includes(user.email.toLowerCase());
+}
+
 // ─── API Routes ────────────────────────────────────────────────
 
 // Public: list venues
@@ -723,6 +747,24 @@ app.get("/api/venues/:id/analytics", (req, res) => {
   }
 
   const db = getDb();
+  const venue = db.prepare("SELECT plan FROM venues WHERE id = ?").get(venueId) as
+    | { plan: string }
+    | undefined;
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+  // Analytics is a PREMIUM-only feature — enforced server-side, applies to the
+  // venue owner too. Base venues get a premium-required response regardless of
+  // whether they own the venue.
+  if (venue.plan !== "premium") {
+    res.status(403).json({
+      code: "PREMIUM_REQUIRED",
+      error: "Analytics is a VibeCheck Premium feature. This venue is on the base plan — contact VibeCheck to upgrade.",
+    });
+    return;
+  }
+
   const period = (req.query.period as string) || "week";
 
   // Build date filter
@@ -830,6 +872,46 @@ app.get("/api/venues/:id/analytics", (req, res) => {
     peak_hour: peakHour,
     check_ins_this_week: checkInsThisWeek,
   });
+});
+
+// ─── Admin: manual plan designation (owner-only) ─────────────
+// List all venues with their plan. Requires an admin session (ADMIN_EMAILS).
+app.get("/api/admin/venues/plans", (req, res) => {
+  if (!isAdmin(req)) {
+    res.status(403).json({ error: "Forbidden — admin access required" });
+    return;
+  }
+  const db = getDb();
+  const venues = db
+    .prepare(
+      "SELECT id, name, location, plan, owner_email FROM venues ORDER BY id ASC"
+    )
+    .all() as { id: number; name: string; location: string; plan: string; owner_email: string | null }[];
+  res.json({ venues });
+});
+
+// Flip a venue's plan between base and premium. Requires an admin session.
+app.post("/api/admin/venues/:id/plan", (req, res) => {
+  if (!isAdmin(req)) {
+    res.status(403).json({ error: "Forbidden — admin access required" });
+    return;
+  }
+  const venueId = parseInt(req.params.id);
+  const plan = (req.body?.plan as string) || "";
+  if (plan !== "base" && plan !== "premium") {
+    res.status(400).json({ error: 'plan must be "base" or "premium"' });
+    return;
+  }
+  const db = getDb();
+  const venue = db.prepare("SELECT id, name FROM venues WHERE id = ?").get(venueId) as
+    | { id: number; name: string }
+    | undefined;
+  if (!venue) {
+    res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+  db.prepare("UPDATE venues SET plan = ?, updated_at = datetime('now') WHERE id = ?").run(plan, venueId);
+  res.json({ id: venueId, name: venue.name, plan });
 });
 
 // POST view completion — records duration a user actually watched
