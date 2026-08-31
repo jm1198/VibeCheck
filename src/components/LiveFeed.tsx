@@ -30,7 +30,9 @@ export default function LiveFeed({ venue }: LiveFeedProps) {
 
   // ─── Promo overlay visibility cycling ───────────────────────
   const [showPromo, setShowPromo] = useState(false);
-  const promoText = venue.promo_text;
+  // Promo overlay is a PREMIUM-only perk — only premium venues surface it.
+  // The server also nulls promo_text for base venues, but we guard here too.
+  const promoText = venue.plan === "premium" ? venue.promo_text : null;
 
   useEffect(() => {
     if (state !== "live" || !promoText) {

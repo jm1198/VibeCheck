@@ -157,6 +157,11 @@ export default function VenueDetail() {
                 )}
               </button>
             )}
+            {venue.featured && (
+              <span className="inline-flex items-center gap-1.5 bg-vibe-accent text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm uppercase tracking-wide">
+                <span className="text-amber-300">★</span> Featured
+              </span>
+            )}
             <span className="inline-flex items-center gap-1.5 bg-transparent text-vibe-text text-xs font-semibold px-3 py-1.5 rounded-full border border-vibe-border-dark uppercase tracking-wide">
               {venue.category}
             </span>

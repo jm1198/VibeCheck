@@ -57,7 +57,13 @@ export default function VenueCard({
         <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent pointer-events-none" />
 
         {/* Live / Offline badge — refined */}
-        <div className="absolute top-4 left-4">
+        <div className="absolute top-4 left-4 flex flex-col items-start gap-2">
+          {venue.featured && (
+            <div className="flex items-center gap-1.5 bg-vibe-accent text-white rounded-full pl-2.5 pr-3.5 py-1.5 shadow-md border border-vibe-accent">
+              <span className="text-amber-300 text-xs">★</span>
+              <span className="text-xs font-bold tracking-widest uppercase">Featured</span>
+            </div>
+          )}
           {venue.is_live === 1 ? (
             <div className="flex items-center gap-2 bg-white/95 backdrop-blur-md rounded-full pl-2.5 pr-4 py-1.5 shadow-md border border-gray-200">
               <span className="relative flex h-2.5 w-2.5">

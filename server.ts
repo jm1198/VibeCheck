@@ -120,11 +120,32 @@ function isAdmin(req: express.Request): boolean {
 
 // ─── API Routes ────────────────────────────────────────────────
 
-// Public: list venues
+// Premium perks derive from the venue's plan, server-side. A venue is "featured"
+// (pinned to the top + badged) iff it is on the premium plan, and only premium
+// venues may surface a promo overlay. We shape every venue we return so these
+// perks can't be spoofed or leaked from the client, and so flipping the plan
+// (via `bun run set-premium`) is the single control that toggles both.
+type VenueResponse = VenueRow & { featured: boolean };
+function withPremiumFeatures(venue: VenueRow): VenueResponse {
+  const premium = venue.plan === "premium";
+  return {
+    ...venue,
+    featured: premium,
+    // Promo overlay is a premium perk — never expose promo_text to base venues,
+    // even if a leftover value survives from a previous premium tier.
+    promo_text: premium ? venue.promo_text : null,
+  };
+}
+
+// Public: list venues — premium venues are featured (pinned to the top of the
+// feed with a badge). Ordering + featured state are decided server-side from plan.
 app.get("/api/venues", (_req, res) => {
   const db = getDb();
-  const venues = db.prepare("SELECT * FROM venues ORDER BY is_live DESC, viewer_count DESC").all() as VenueRow[];
-  res.json(venues);
+  const venues = db.prepare(`
+    SELECT * FROM venues
+    ORDER BY CASE WHEN plan = 'premium' THEN 0 ELSE 1 END, is_live DESC, viewer_count DESC
+  `).all() as VenueRow[];
+  res.json(venues.map(withPremiumFeatures));
 });
 
 // Get user's favorited venues (auth required) — must be before :id
@@ -142,7 +163,7 @@ app.get("/api/venues/favorites", (req, res) => {
     WHERE f.user_id = ?
     ORDER BY f.created_at DESC
   `).all(session.userId) as (VenueRow & { favorited_at: string })[];
-  res.json(favorites);
+  res.json(favorites.map((f) => ({ ...withPremiumFeatures(f), favorited_at: f.favorited_at })));
 });
 
 // Public: single venue — NOTE: must come after /api/venues/favorites
@@ -153,7 +174,7 @@ app.get("/api/venues/:id", (req, res) => {
     res.status(404).json({ error: "Venue not found" });
     return;
   }
-  res.json(venue);
+  res.json(withPremiumFeatures(venue));
 });
 
 // Auth: signup
@@ -665,17 +686,20 @@ app.get("/api/venues/:id/hours-check", (req, res) => {
 app.get("/api/venues/:id/promo", (req, res) => {
   const venueId = parseInt(req.params.id);
   const db = getDb();
-  const venue = db.prepare("SELECT promo_text FROM venues WHERE id = ?").get(venueId) as
-    | { promo_text: string | null }
+  const venue = db.prepare("SELECT promo_text, plan FROM venues WHERE id = ?").get(venueId) as
+    | { promo_text: string | null; plan: string }
     | undefined;
   if (!venue) {
     res.status(404).json({ error: "Venue not found" });
     return;
   }
-  res.json({ promo_text: venue.promo_text });
+  // Promo overlay is a PREMIUM-only perk — base venues never receive promo text,
+  // even if a leftover value survives from a previous premium tier.
+  const promo_text = venue.plan === "premium" ? venue.promo_text : null;
+  res.json({ promo_text });
 });
 
-// PATCH promo text (auth-gated to venue owner)
+// PATCH promo text (auth-gated to venue owner, premium-only)
 app.patch("/api/venues/:id/promo", (req, res) => {
   const session = getSessionUser(req);
   if (!session) {
@@ -691,11 +715,21 @@ app.patch("/api/venues/:id/promo", (req, res) => {
   const { promo_text } = req.body;
   const db = getDb();
 
-  const venue = db.prepare("SELECT id FROM venues WHERE id = ?").get(venueId) as
-    | { id: number }
+  const venue = db.prepare("SELECT id, plan FROM venues WHERE id = ?").get(venueId) as
+    | { id: number; plan: string }
     | undefined;
   if (!venue) {
     res.status(404).json({ error: "Venue not found" });
+    return;
+  }
+  // Promo overlay is a PREMIUM-only feature — enforced server-side, applies to
+  // the venue owner too. Base venues get a premium-required response regardless
+  // of whether they own the venue.
+  if (venue.plan !== "premium") {
+    res.status(403).json({
+      code: "PREMIUM_REQUIRED",
+      error: "Promotional overlays are a VibeCheck Premium feature. This venue is on the base plan — contact VibeCheck to upgrade.",
+    });
     return;
   }
 

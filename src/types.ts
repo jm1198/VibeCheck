@@ -16,6 +16,7 @@ export interface Venue {
   density_updated_at?: string | null;
   promo_text?: string | null;
   plan?: "base" | "premium";
+  featured?: boolean;
   created_at: string;
   updated_at: string;
 }

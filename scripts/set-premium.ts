@@ -66,9 +66,11 @@ function setVenue(venueId: number, plan: string): void {
   console.log(`\n✅ Venue #${v.id} "${v.name}" is now on the ${plan.toUpperCase()} plan.\n`);
 
   if (plan === "premium") {
-    console.log("   Analytics is now unlocked for this venue in its dashboard.");
+    console.log("   Analytics, featured placement (pinned to the top) and the promo overlay");
+    console.log("   are now unlocked for this venue — the owner can use them immediately.");
   } else {
-    console.log("   Analytics is now locked — the dashboard will show the Premium upgrade prompt.");
+    console.log("   Analytics, featured placement and the promo overlay are now disabled.");
+    console.log("   The dashboard will show the Premium upgrade prompt for these features.");
   }
   console.log("");
 }

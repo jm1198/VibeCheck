@@ -797,6 +797,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              {venue.plan === "premium" ? (
               <div className="bg-vibe-card border border-vibe-border rounded-2xl p-6 shadow-card">
                 <div className="mb-4">
                   <label className="text-sm font-semibold text-vibe-text block mb-2">
@@ -889,6 +890,27 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
+              ) : (
+                /* ── Premium-locked state for base venues ── */
+                <div className="bg-vibe-card border border-vibe-border rounded-2xl p-10 shadow-card text-center">
+                  <div className="mx-auto w-16 h-16 rounded-2xl bg-pink-50 flex items-center justify-center mb-5">
+                    <svg className="w-8 h-8 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-bold text-vibe-text mb-2">Promo overlays are a Premium feature</h3>
+                  <p className="text-vibe-muted text-sm max-w-md mx-auto leading-relaxed mb-6">
+                    Put a promotional call-to-action on your live feed — e.g. "Happy hour until 8pm" — with the VibeCheck Premium plan.
+                  </p>
+                  <div className="inline-flex items-center gap-2 bg-vibe-surface border border-vibe-border rounded-full px-4 py-2 text-sm text-vibe-muted">
+                    <span className="text-vibe-accent font-semibold">⭐ Premium</span>
+                    <span className="text-vibe-muted-dim">· Featured placement, analytics &amp; more</span>
+                  </div>
+                  <p className="text-vibe-muted-dim text-xs mt-6">
+                    Contact VibeCheck to upgrade this venue to Premium.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* ═══ section: Venue Settings ═══ */}

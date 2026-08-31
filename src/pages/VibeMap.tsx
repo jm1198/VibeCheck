@@ -179,6 +179,11 @@ export default function VibeMap() {
                           >
                             {venue.name}
                           </h3>
+                          {venue.featured && (
+                            <span className="inline-block bg-vibe-accent text-white text-[10px] font-bold px-2 py-0.5 rounded-full mb-2 uppercase tracking-wide">
+                              ★ Featured
+                            </span>
+                          )}
                           <span
                             className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full border mb-2 uppercase tracking-wide ${
                               venue.category === "club"
