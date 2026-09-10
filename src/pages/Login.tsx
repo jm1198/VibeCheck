@@ -51,8 +51,8 @@ export default function Login() {
       navigate(redirectTo, { replace: true });
       return;
     }
-    if (user.role === "venue_owner" && user.venue_id) {
-      navigate("/dashboard/manage", { replace: true });
+    if (user.role === "venue_owner") {
+      navigate(user.venue_id ? "/dashboard/manage" : "/setup", { replace: true });
     } else {
       navigate("/", { replace: true });
     }
@@ -143,8 +143,8 @@ export default function Login() {
         await refresh();
         if (redirectTo) {
           navigate(redirectTo, { replace: true });
-        } else if (result.role === "venue_owner" && result.venue_id) {
-          navigate("/dashboard/manage", { replace: true });
+        } else if (result.role === "venue_owner") {
+          navigate(result.venue_id ? "/dashboard/manage" : "/setup", { replace: true });
         } else {
           navigate("/", { replace: true });
         }
