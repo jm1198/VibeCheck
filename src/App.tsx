@@ -4,6 +4,7 @@ import VenueGrid from "./pages/VenueGrid";
 import VenueDetail from "./pages/VenueDetail";
 import VibeMap from "./pages/VibeMap";
 import Login from "./pages/Login";
+import ResetPassword from "./pages/ResetPassword";
 import Setup from "./pages/Setup";
 import Dashboard from "./pages/Dashboard";
 import CheckIn from "./pages/CheckIn";
@@ -20,6 +21,7 @@ export default function App() {
             <Route path="/venue/:id" element={<VenueDetail />} />
             <Route path="/login" element={<Login />} />
             <Route path="/dashboard" element={<Login />} />
+            <Route path="/reset" element={<ResetPassword />} />
             <Route path="/setup" element={<Setup />} />
             <Route path="/dashboard/manage" element={<Dashboard />} />
             <Route path="/check-in/:code" element={<CheckIn />} />

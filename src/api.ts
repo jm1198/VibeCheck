@@ -17,7 +17,9 @@ async function request<T>(
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed: ${res.status}`);
+    const err = new Error(body.error || `Request failed: ${res.status}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -68,6 +70,23 @@ export function googleLogin(
   return request("/auth/google", {
     method: "POST",
     body: JSON.stringify({ credential }),
+  });
+}
+
+export function forgotPassword(email: string): Promise<{ success: boolean }> {
+  return request("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resetPassword(
+  token: string,
+  password: string
+): Promise<{ success: boolean }> {
+  return request("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
   });
 }
 

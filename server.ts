@@ -2,6 +2,8 @@ import cors from "cors";
 import express from "express";
 import crypto from "crypto";
 import http from "http";
+import net from "net";
+import tls from "tls";
 import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocketServer, WebSocket } from "ws";
@@ -29,6 +31,9 @@ const isDev = process.argv.includes("--dev");
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Behind a single reverse proxy (the platform's host): honor X-Forwarded-For so
+// req.ip (used by the auth rate limiter) is the real client IP, not the proxy's.
+app.set("trust proxy", 1);
 
 // ─── Thumbnail generator ───────────────────────────────────────
 function generateThumbnail(id: number): string {
@@ -75,8 +80,308 @@ app.get("/api/thumbnail/:id", (req, res) => {
 });
 
 // ─── Auth helpers ──────────────────────────────────────────────
-function hashPassword(password: string): string {
-  return crypto.createHash("sha256").update(password).digest("hex");
+// Password hashes use node:crypto scrypt with a per-user random salt, stored
+// self-describing as "scrypt$N$r$p$salt$hash". Legacy accounts (plain 64-hex
+// SHA-256, no prefix) are verified against the old scheme and transparently
+// re-hashed with scrypt on their next successful login.
+const scryptAsync = (password: string, salt: string, keylen: number, N: number, r: number, p: number): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, keylen, { N, r, p }, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey);
+    });
+  });
+const SCRYPT_N = 16384;
+const SCRYPT_R = 8;
+const SCRYPT_P = 1;
+const SCRYPT_KEYLEN = 64;
+const LEGACY_SHA256_RE = /^[0-9a-f]{64}$/;
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const derived = await scryptAsync(password, salt, SCRYPT_KEYLEN, SCRYPT_N, SCRYPT_R, SCRYPT_P);
+  return `scrypt$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt}$${derived.toString("hex")}`;
+}
+
+function isLegacySha256Hash(stored: string): boolean {
+  return LEGACY_SHA256_RE.test(stored);
+}
+
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  if (!stored) return false;
+  if (isLegacySha256Hash(stored)) {
+    const digest = crypto.createHash("sha256").update(password).digest("hex");
+    return crypto.timingSafeEqual(Buffer.from(digest, "hex"), Buffer.from(stored, "hex"));
+  }
+  const parts = stored.split("$");
+  if (parts.length !== 6 || parts[0] !== "scrypt") return false;
+  const [, nStr, rStr, pStr, salt, hashHex] = parts;
+  const N = parseInt(nStr, 10);
+  const r = parseInt(rStr, 10);
+  const p = parseInt(pStr, 10);
+  if (!N || !r || !p || !salt) return false;
+  const expected = Buffer.from(hashHex, "hex");
+  if (expected.length === 0) return false;
+  try {
+    const derived = await scryptAsync(password, salt, expected.length, N, r, p);
+    return crypto.timingSafeEqual(derived, expected);
+  } catch {
+    return false;
+  }
+}
+
+// ─── Rate limiting (tiny in-memory, per-IP) ───────────────────
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX = 10;
+const rateHits = new Map<string, number[]>();
+
+function rateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const recent = (rateHits.get(ip) || []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  if (recent.length >= RATE_LIMIT_MAX) {
+    rateHits.set(ip, recent);
+    res.status(429).json({ error: "Too many attempts. Please wait a few minutes and try again." });
+    return;
+  }
+  recent.push(now);
+  rateHits.set(ip, recent);
+  // Opportunistic cleanup so the map can't grow unbounded.
+  if (rateHits.size > 2000) {
+    for (const [k, v] of rateHits) {
+      if (v.length === 0 || now - v[v.length - 1] > RATE_LIMIT_WINDOW_MS) rateHits.delete(k);
+    }
+  }
+  next();
+}
+
+// ─── Password reset email delivery ────────────────────────────
+// SMTP is optional: if SMTP_HOST is set we send via nodemailer when it happens
+// to be installed, otherwise a tiny no-dependency SMTP client (node:net/tls).
+// With no SMTP provider configured the reset link is logged server-side so the
+// dev loop still works end to end. The API response never reveals whether an
+// account exists, either way.
+function sendSmtp(opts: {
+  host: string;
+  port: number;
+  user?: string;
+  pass?: string;
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    let socket: net.Socket | tls.TLSSocket;
+    let buffer = "";
+    let stage = 0;
+    let awaitingDataReply = false;
+    let done = false;
+
+    const finish = (v: boolean) => {
+      if (done) return;
+      done = true;
+      try {
+        socket.destroy();
+      } catch {
+        /* ignore */
+      }
+      resolve(v);
+    };
+
+    const body =
+      `From: ${opts.from}\r\nTo: ${opts.to}\r\nSubject: ${opts.subject}\r\n` +
+      "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n" +
+      `\r\n${opts.text}\r\n.\r\n`;
+
+    const sendCmd = (line: string) => socket.write(line + "\r\n", "utf8");
+
+    const runStage = () => {
+      switch (stage) {
+        case 0:
+          sendCmd("EHLO vibecheck.local");
+          break;
+        case 1:
+          sendCmd("STARTTLS");
+          break;
+        case 2:
+          sendCmd("EHLO vibecheck.local");
+          break;
+        case 3:
+          if (opts.user) {
+            const auth = Buffer.from(`\0${opts.user}\0${opts.pass || ""}`).toString("base64");
+            sendCmd(`AUTH PLAIN ${auth}`);
+          } else {
+            stage = 4;
+            runStage();
+          }
+          break;
+        case 4:
+          sendCmd(`MAIL FROM:<${opts.from}>`);
+          break;
+        case 5:
+          sendCmd(`RCPT TO:<${opts.to}>`);
+          break;
+        case 6:
+          sendCmd("DATA");
+          break;
+        case 7:
+          sendCmd("QUIT");
+          break;
+        default:
+          finish(true);
+      }
+    };
+
+    const handleFinalLine = (line: string) => {
+      const code = parseInt(line.slice(0, 3), 10);
+      if (code >= 400) {
+        finish(false);
+        return;
+      }
+      if (awaitingDataReply) {
+        awaitingDataReply = false;
+        if (code === 250) {
+          stage = 7;
+          runStage();
+        } else {
+          finish(false);
+        }
+        return;
+      }
+      switch (stage) {
+        case 0:
+          if (code === 250) {
+            stage = 1;
+            runStage();
+          } else finish(false);
+          break;
+        case 1:
+          if (code !== 220) {
+            finish(false);
+            return;
+          }
+          // Upgrade to TLS (STARTTLS)
+          try {
+            const secured = tls.connect({ socket: socket as net.Socket, servername: opts.host });
+            secured.on("secureConnect", () => {
+              socket = secured;
+              buffer = "";
+              stage = 2;
+              runStage();
+            });
+            secured.on("data", onData);
+            secured.on("error", () => finish(false));
+            secured.on("close", () => finish(false));
+          } catch {
+            finish(false);
+          }
+          break;
+        case 2:
+          if (code === 250) {
+            stage = 3;
+            runStage();
+          } else finish(false);
+          break;
+        case 3:
+          if (code === 235) {
+            stage = 4;
+            runStage();
+          } else finish(false);
+          break;
+        case 4:
+          if (code === 250) {
+            stage = 5;
+            runStage();
+          } else finish(false);
+          break;
+        case 5:
+          if (code === 250 || code === 251) {
+            stage = 6;
+            runStage();
+          } else finish(false);
+          break;
+        case 6:
+          if (code === 354) {
+            awaitingDataReply = true;
+            socket.write(body);
+          } else finish(false);
+          break;
+        case 7:
+          finish(code === 221);
+          break;
+        default:
+          finish(false);
+      }
+    };
+
+    function onData(chunk: Buffer) {
+      buffer += chunk.toString("utf8");
+      let idx: number;
+      while ((idx = buffer.indexOf("\r\n")) !== -1) {
+        const line = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (line.length >= 4 && line[3] === "-") continue; // multiline continuation
+        if (/^\d{3}/.test(line)) handleFinalLine(line);
+      }
+    }
+
+    if (opts.port === 465) {
+      // Immediate TLS (SMTPS)
+      socket = tls.connect({ host: opts.host, port: opts.port });
+      socket.on("secureConnect", () => {
+        buffer = "";
+        runStage();
+      });
+    } else {
+      // Plain TCP, upgrade via STARTTLS in stage 1
+      socket = net.connect(opts.port, opts.host);
+      socket.on("connect", () => runStage());
+    }
+    socket.on("data", onData);
+    socket.on("error", () => finish(false));
+    socket.on("close", () => finish(false));
+    setTimeout(() => finish(false), 15000);
+  });
+}
+
+async function sendResetEmail(to: string, resetUrl: string): Promise<boolean> {
+  const host = process.env.SMTP_HOST;
+  if (!host) return false;
+  const port = parseInt(process.env.SMTP_PORT || "587", 10) || 587;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || user || `no-reply@${host}`;
+  const subject = "Reset your VibeCheck password";
+  const text =
+    `We received a request to reset your VibeCheck password.\n\n` +
+    `Open this link to choose a new one. It expires in 20 minutes:\n\n${resetUrl}\n\n` +
+    `If you didn't ask for this, you can safely ignore this email.\n\n— VibeCheck`;
+  try {
+    // nodemailer may not be installed — resolve at runtime, fall back to the
+    // tiny built-in SMTP client. `as string` keeps TS from type-checking a
+    // module we intentionally don't depend on.
+    let nodemailer: any = null;
+    try {
+      nodemailer = (await import("nodemailer" as string)).default;
+    } catch {
+      nodemailer = null;
+    }
+    if (nodemailer && typeof nodemailer.createTransport === "function") {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: user ? { user, pass } : undefined,
+      });
+      await transporter.sendMail({ from, to, subject, text });
+      return true;
+    }
+    return await sendSmtp({ host, port, user, pass, from, to, subject, text });
+  } catch (err) {
+    console.error("Failed to send password reset email:", err);
+    return false;
+  }
 }
 
 function generateSessionToken(): string {
@@ -178,7 +483,7 @@ app.get("/api/venues/:id", (req, res) => {
 });
 
 // Auth: signup
-app.post("/api/auth/signup", (req, res) => {
+app.post("/api/auth/signup", rateLimit, async (req, res) => {
   const { email, password, role, privacyAccepted } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Email and password required" });
@@ -188,15 +493,18 @@ app.post("/api/auth/signup", (req, res) => {
     res.status(400).json({ error: "You must accept the Privacy Policy to create an account" });
     return;
   }
+  const emailNorm = String(email).trim().toLowerCase();
   const db = getDb();
-  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(emailNorm);
   if (existing) {
-    res.status(409).json({ error: "Email already registered" });
+    res.status(409).json({
+      error: "This email is already registered — log in, or use 'Forgot password?'.",
+    });
     return;
   }
-  const hash = hashPassword(password);
+  const hash = await hashPassword(password);
   const userRole = role === "venue_owner" ? "venue_owner" : "consumer";
-  db.prepare("INSERT INTO users (email, password_hash, role, privacy_accepted_at) VALUES (?, ?, ?, datetime('now'))").run(email, hash, userRole);
+  db.prepare("INSERT INTO users (email, password_hash, role, privacy_accepted_at) VALUES (?, ?, ?, datetime('now'))").run(emailNorm, hash, userRole);
   res.json({ success: true, role: userRole });
 });
 
@@ -269,19 +577,25 @@ app.post("/api/venues", async (req, res) => {
 });
 
 // Auth: login
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", rateLimit, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Email and password required" });
     return;
   }
+  const emailNorm = String(email).trim().toLowerCase();
   const db = getDb();
-  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as
+  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(emailNorm) as
     | { id: number; email: string; password_hash: string; venue_id: number | null; role: string }
     | undefined;
-  if (!user || user.password_hash !== hashPassword(password)) {
-    res.status(401).json({ error: "Invalid credentials" });
+  if (!user || !(await verifyPassword(password, user.password_hash))) {
+    res.status(401).json({ error: "Incorrect email or password" });
     return;
+  }
+  // Transparently migrate legacy SHA-256 hashes to scrypt on successful login.
+  if (isLegacySha256Hash(user.password_hash)) {
+    const newHash = await hashPassword(password);
+    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, user.id);
   }
   const token = generateSessionToken();
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -292,6 +606,74 @@ app.post("/api/auth/login", (req, res) => {
     expiresAt
   );
   res.json({ token, venue_id: user.venue_id, email: user.email, role: user.role });
+});
+
+// Auth: forgot password — always answers success so accounts can't be enumerated.
+// If the account exists a single-use reset link (valid 20 minutes) is created and
+// delivered by email when SMTP is configured, otherwise logged server-side.
+app.post("/api/auth/forgot-password", rateLimit, async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    res.status(400).json({ error: "Email required" });
+    return;
+  }
+  const emailNorm = String(email).trim().toLowerCase();
+  const db = getDb();
+  const user = db.prepare("SELECT id, email FROM users WHERE email = ?").get(emailNorm) as
+    | { id: number; email: string }
+    | undefined;
+  if (user) {
+    const token = crypto.randomBytes(32).toString("hex");
+    // Store expiry in SQLite time format so `expires_at > datetime('now')` compares correctly.
+    db.prepare("INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+20 minutes'))").run(
+      token,
+      user.id
+    );
+    const baseUrl =
+      process.env.PUBLIC_BASE_URL ||
+      `${req.protocol}://${req.get("host")}`;
+    const resetUrl = `${baseUrl}/reset?token=${token}`;
+    const sent = await sendResetEmail(user.email, resetUrl);
+    if (!sent) {
+      console.log(`[password-reset] reset link for ${user.email}: ${resetUrl}`);
+    }
+  }
+  // Always the same generic response — no user enumeration.
+  res.json({ success: true });
+});
+
+// Auth: reset password with a single-use token. Invalidates the token and every
+// session the user has so a leaked/reset password kicks out stale logins.
+app.post("/api/auth/reset-password", rateLimit, async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) {
+    res.status(400).json({ error: "Token and new password required" });
+    return;
+  }
+  const db = getDb();
+  const row = db
+    .prepare("SELECT * FROM password_resets WHERE token = ?")
+    .get(String(token)) as
+    | { token: string; user_id: number; expires_at: string; used_at: string | null }
+    | undefined;
+  if (!row) {
+    res.status(400).json({ error: "This reset link is invalid. Please request a new one." });
+    return;
+  }
+  if (row.used_at) {
+    res.status(400).json({ error: "This reset link has already been used. Please request a new one." });
+    return;
+  }
+  const nowRow = db.query("SELECT datetime('now') as now").get() as { now: string };
+  if (row.expires_at < nowRow.now) {
+    res.status(400).json({ error: "This reset link has expired. Please request a new one." });
+    return;
+  }
+  const newHash = await hashPassword(password);
+  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, row.user_id);
+  db.prepare("UPDATE password_resets SET used_at = datetime('now') WHERE token = ?").run(row.token);
+  db.prepare("DELETE FROM sessions WHERE user_id = ?").run(row.user_id);
+  res.json({ success: true });
 });
 
 // Auth: Google OAuth login/signup

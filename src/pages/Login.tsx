@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
-import { login, signup, googleLogin } from "../api";
+import { login, signup, googleLogin, forgotPassword } from "../api";
 import { useAuth } from "../AuthContext";
 
 // Extend Window for Google Identity Services
@@ -32,11 +32,15 @@ export default function Login() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "forgot">("login");
   const [accountType, setAccountType] = useState<"consumer" | "venue_owner">("consumer");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false);
+
+  // Show a banner when the user just reset their password (?reset=1)
+  const showResetNotice = searchParams.get("reset") === "1";
 
   // Redirect after login — check for ?redirect= param
   const redirectTo = searchParams.get("redirect") || null;
@@ -135,6 +139,7 @@ export default function Login() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setNotice("");
     setLoading(true);
     try {
       if (mode === "login") {
@@ -148,6 +153,8 @@ export default function Login() {
         } else {
           navigate("/", { replace: true });
         }
+      } else if (mode === "forgot") {
+        await handleForgotSubmit();
       } else {
         if (!agreedToPrivacy) {
           setError("Please read and agree to the Privacy Policy to continue.");
@@ -168,10 +175,27 @@ export default function Login() {
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const status = (err as Error & { status?: number }).status;
+      if (status === 409 && mode === "signup") {
+        // Email already registered — take the user to the login view so they can
+        // get in (or recover via "Forgot password?") instead of dead-ending.
+        setMode("login");
+        setError(err instanceof Error ? err.message : "This email is already registered");
+      } else {
+        setError(err instanceof Error ? err.message : "Something went wrong");
+      }
     } finally {
       setLoading(false);
     }
+  }
+
+  // Forgot-password: always show the generic "if it exists" message (no enumeration)
+  async function handleForgotSubmit() {
+    await forgotPassword(email);
+    setNotice(
+      "If an account exists for that email, a reset link is on its way. " +
+        "Check your inbox (and spam) — it expires in 20 minutes."
+    );
   }
 
   // Don't render if already logged in (will redirect)
@@ -238,14 +262,24 @@ export default function Login() {
         >
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-vibe-text tracking-tight">
-              {mode === "login" ? "Log In" : "Create Account"}
+              {mode === "forgot"
+                ? "Reset Password"
+                : mode === "login"
+                  ? "Log In"
+                  : "Create Account"}
             </h2>
-            {accountType === "venue_owner" && (
+            {accountType === "venue_owner" && mode !== "forgot" && (
               <span className="text-xs font-medium text-vibe-accent bg-vibe-accent/10 px-2 py-0.5 rounded-full">
                 Venue Owner
               </span>
             )}
           </div>
+
+          {showResetNotice && (
+            <div className="text-sm p-3 rounded-xl font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Password updated successfully — log in with your new password.
+            </div>
+          )}
 
           {error && (
             <div
@@ -259,105 +293,170 @@ export default function Login() {
             </div>
           )}
 
-          {/* Google Sign In (consumer login only, when configured) */}
-          {accountType === "consumer" && mode === "login" && import.meta.env.VITE_GOOGLE_CLIENT_ID && !(import.meta.env.VITE_GOOGLE_CLIENT_ID as string).startsWith("YOUR_") && (
+          {notice && (
+            <div className="text-sm p-3 rounded-xl font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              {notice}
+            </div>
+          )}
+
+          {mode === "forgot" ? (
             <>
-              <div id="google-signin-btn" className="flex justify-center min-h-[40px]" />
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px bg-vibe-border" />
-                <span className="text-xs text-vibe-muted font-medium">or</span>
-                <div className="flex-1 h-px bg-vibe-border" />
+              <p className="text-sm text-vibe-muted leading-relaxed">
+                Enter the email you signed up with and we'll send you a link to
+                choose a new password. The link expires in 20 minutes.
+              </p>
+              <div>
+                <label className="block text-sm text-vibe-muted mb-1.5 font-medium">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                  className="w-full bg-vibe-bg border border-vibe-border rounded-xl px-4 py-3 text-vibe-text placeholder-vibe-muted-dim focus:outline-none focus:border-vibe-accent focus:ring-1 focus:ring-vibe-accent/20 transition-all"
+                  placeholder={isDashboardPath ? "demo@vibecheck.app" : "you@email.com"}
+                />
               </div>
-            </>
-          )}
-
-          <div>
-            <label className="block text-sm text-vibe-muted mb-1.5 font-medium">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full bg-vibe-bg border border-vibe-border rounded-xl px-4 py-3 text-vibe-text placeholder-vibe-muted-dim focus:outline-none focus:border-vibe-accent focus:ring-1 focus:ring-vibe-accent/20 transition-all"
-              placeholder={isDashboardPath ? "demo@vibecheck.app" : "you@email.com"}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-vibe-muted mb-1.5 font-medium">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full bg-vibe-bg border border-vibe-border rounded-xl px-4 py-3 text-vibe-text placeholder-vibe-muted-dim focus:outline-none focus:border-vibe-accent focus:ring-1 focus:ring-vibe-accent/20 transition-all"
-              placeholder={isDashboardPath ? "demo123" : "••••••••"}
-            />
-          </div>
-
-          {mode === "signup" && (
-            <label className="flex items-start gap-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={agreedToPrivacy}
-                onChange={(e) => setAgreedToPrivacy(e.target.checked)}
-                className="mt-0.5 w-4 h-4 rounded accent-vibe-accent cursor-pointer shrink-0"
-                required
-              />
-              <span className="text-xs text-vibe-muted leading-relaxed">
-                I have read and agree to the{" "}
-                <a
-                  href="/privacy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-vibe-accent hover:underline font-semibold"
-                >
-                  Privacy Policy
-                </a>
-                . Your data is stored privately and live venue feeds have no audio or recordings.
-              </span>
-            </label>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-vibe-accent hover:bg-vibe-accent-glow text-white font-semibold rounded-full py-3 transition-all shadow-md disabled:opacity-50 press-scale"
-          >
-            {loading ? "Please wait..." : mode === "login" ? "Log In" : "Sign Up"}
-          </button>
-
-          <p className="text-center text-sm text-vibe-muted">
-            {mode === "login" ? (
-              <>
-                Don't have an account?{" "}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMode("signup");
-                    setError("");
-                  }}
-                  className="text-vibe-accent hover:underline font-semibold"
-                >
-                  Sign up
-                </button>
-              </>
-            ) : (
-              <>
-                Already have an account?{" "}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-vibe-accent hover:bg-vibe-accent-glow text-white font-semibold rounded-full py-3 transition-all shadow-md disabled:opacity-50 press-scale"
+              >
+                {loading ? "Please wait..." : "Send Reset Link"}
+              </button>
+              <p className="text-center text-sm text-vibe-muted">
+                Remembered it?{" "}
                 <button
                   type="button"
                   onClick={() => {
                     setMode("login");
                     setError("");
+                    setNotice("");
                   }}
                   className="text-vibe-accent hover:underline font-semibold"
                 >
-                  Log in
+                  Back to log in
                 </button>
-              </>
-            )}
-          </p>
+              </p>
+            </>
+          ) : (
+            <>
+              {/* Google Sign In (consumer login only, when configured) */}
+              {accountType === "consumer" && mode === "login" && import.meta.env.VITE_GOOGLE_CLIENT_ID && !(import.meta.env.VITE_GOOGLE_CLIENT_ID as string).startsWith("YOUR_") && (
+                <>
+                  <div id="google-signin-btn" className="flex justify-center min-h-[40px]" />
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px bg-vibe-border" />
+                    <span className="text-xs text-vibe-muted font-medium">or</span>
+                    <div className="flex-1 h-px bg-vibe-border" />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-sm text-vibe-muted mb-1.5 font-medium">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="w-full bg-vibe-bg border border-vibe-border rounded-xl px-4 py-3 text-vibe-text placeholder-vibe-muted-dim focus:outline-none focus:border-vibe-accent focus:ring-1 focus:ring-vibe-accent/20 transition-all"
+                  placeholder={isDashboardPath ? "demo@vibecheck.app" : "you@email.com"}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-vibe-muted mb-1.5 font-medium">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="w-full bg-vibe-bg border border-vibe-border rounded-xl px-4 py-3 text-vibe-text placeholder-vibe-muted-dim focus:outline-none focus:border-vibe-accent focus:ring-1 focus:ring-vibe-accent/20 transition-all"
+                  placeholder={isDashboardPath ? "demo123" : "••••••••"}
+                />
+                {mode === "login" && (
+                  <div className="mt-1.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode("forgot");
+                        setError("");
+                        setNotice("");
+                      }}
+                      className="text-xs text-vibe-accent hover:underline font-semibold"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {mode === "signup" && (
+                <label className="flex items-start gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={agreedToPrivacy}
+                    onChange={(e) => setAgreedToPrivacy(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded accent-vibe-accent cursor-pointer shrink-0"
+                    required
+                  />
+                  <span className="text-xs text-vibe-muted leading-relaxed">
+                    I have read and agree to the{" "}
+                    <a
+                      href="/privacy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-vibe-accent hover:underline font-semibold"
+                    >
+                      Privacy Policy
+                    </a>
+                    . Your data is stored privately and live venue feeds have no audio or recordings.
+                  </span>
+                </label>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-vibe-accent hover:bg-vibe-accent-glow text-white font-semibold rounded-full py-3 transition-all shadow-md disabled:opacity-50 press-scale"
+              >
+                {loading ? "Please wait..." : mode === "login" ? "Log In" : "Sign Up"}
+              </button>
+
+              <p className="text-center text-sm text-vibe-muted">
+                {mode === "login" ? (
+                  <>
+                    Don't have an account?{" "}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode("signup");
+                        setError("");
+                      }}
+                      className="text-vibe-accent hover:underline font-semibold"
+                    >
+                      Sign up
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Already have an account?{" "}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode("login");
+                        setError("");
+                      }}
+                      className="text-vibe-accent hover:underline font-semibold"
+                    >
+                      Log in
+                    </button>
+                  </>
+                )}
+              </p>
+            </>
+          )}
         </form>
 
         {/* Demo hint — only for dashboard */}
