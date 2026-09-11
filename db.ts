@@ -191,6 +191,18 @@ function initSchema() {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
+
+  // ── Password reset tokens (single-use, short-lived) ─────────
+  d.run(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
 }
 
 function seedIfEmpty() {
